@@ -21,7 +21,7 @@ Fraunces Variable se usa en títulos. DM Sans Variable se usa en lectura, formul
 
 ## Interfaz
 
-- Una acción principal por vista. En la biblioteca, el formulario queda a la derecha en escritorio y encima de la colección en pantallas angostas.
+- Una acción principal por vista. En la biblioteca, el formulario queda a la derecha en escritorio y debajo de la colección en pantallas angostas. «Agregar libro» lleva directo al formulario.
 - Conservá el voseo. Los campos tienen etiquetas visibles. Mostrá el resultado de cada guardado.
 - Usá controles nativos con foco visible y objetivos táctiles de al menos 44 px. La colección admite títulos largos y zoom del navegador.
 - Empaquetá los recursos visuales con la PWA. La fotografía de portada es decorativa y la biblioteca usa IndexedDB.

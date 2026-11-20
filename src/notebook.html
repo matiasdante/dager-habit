@@ -5,8 +5,8 @@
     @if (books().length) {
       <div class="study-form">
         <label for="notebook-book">Libro</label>
-        <select #book id="notebook-book" (change)="bookId.set(book.value); syncedUrl.set('')">
-          @for (item of books(); track item.id) { <option [value]="item.id">{{ item.title }}</option> }
+        <select #book id="notebook-book" name="notebook-book" [disabled]="busy()" (change)="selectBook(book.value)">
+          @for (item of books(); track item.id) { <option [value]="item.id" [selected]="selected()?.id === item.id">{{ item.title }}</option> }
         </select>
       </div>
     }
@@ -17,14 +17,20 @@
       </details>
       <div class="study-actions">
         <button class="secondary-action" type="button" (click)="download()">Descargar resumen</button>
-        <a class="secondary-action" href="https://notebook.google.com/" target="_blank" rel="noopener noreferrer">Abrir NotebookLM personal</a>
+        <a class="secondary-action" href="https://notebook.google.com/" target="_blank" rel="noopener noreferrer">Abrir NotebookLM personal <span class="sr-only">(pestaña nueva)</span></a>
       </div>
       <p class="storage-note">Podés agregar el archivo descargado como fuente desde NotebookLM.</p>
-    } @else { <p>Completá una sesión del libro para preparar el resumen.</p> }
+    } @else if (selected(); as book) {
+      <p class="storage-note">Completá una sesión del libro para preparar el resumen.</p>
+      <div class="study-actions"><a class="secondary-action" [href]="studyLink(book)">Estudiar este libro</a></div>
+    } @else {
+      <p>Para preparar un resumen, <a href="#/">agregá un libro a la biblioteca</a>.</p>
+    }
   </section>
   <section class="study-card settings-card">
     <h2>Sincronización con Google Cloud</h2>
     <p>Para enviar el resumen desde Dager Habit, necesitás una licencia de Gemini Notebook Enterprise y permiso de edición en el notebook.</p>
+    <p class="status" role="status">{{ checking() ? 'Comprobando el acceso…' : status() }}</p>
     @if (google(); as access) {
       @if (!access.configured) {
         <p class="storage-note">La integración con Google Cloud todavía no está configurada en este servidor.</p>
@@ -38,25 +44,25 @@
         } @else if (!access.notebooks.length) {
           <p class="storage-note">Abrí o creá un notebook en Enterprise. Después actualizá esta lista.</p>
         } @else {
-          <form class="study-form" (submit)="sync($event, target.value)">
+          <form class="study-form" autocomplete="off" (submit)="sync($event, target.value)">
             <label for="notebook-target">Notebook de destino</label>
-            <select id="notebook-target" #target required>
+            <select id="notebook-target" name="notebook-target" #target required [disabled]="busy() || checking()">
               @for (item of access.notebooks; track item.id) { <option [value]="item.id">{{ item.title }}</option> }
             </select>
-            <button class="primary-action" [disabled]="busy() || !report()">{{ busy() ? 'Enviando…' : 'Enviar resumen' }}</button>
+            <button class="primary-action" [disabled]="busy() || checking() || !report()">{{ busy() ? 'Enviando…' : 'Enviar resumen' }}</button>
           </form>
         }
         <div class="study-actions">
-          @if (access.enterpriseUrl) { <a class="secondary-action" [href]="access.enterpriseUrl" target="_blank" rel="noopener noreferrer">Abrir NotebookLM Enterprise</a> }
-          <button class="secondary-action" type="button" [disabled]="busy()" (click)="refresh()">Actualizar acceso</button>
-          <button class="secondary-action" type="button" [disabled]="busy()" (click)="disconnect()">Desvincular Google</button>
+          @if (access.enterpriseUrl) { <a class="secondary-action" [href]="access.enterpriseUrl" target="_blank" rel="noopener noreferrer">Abrir NotebookLM Enterprise <span class="sr-only">(pestaña nueva)</span></a> }
+          <button class="secondary-action" type="button" [disabled]="busy() || checking()" (click)="refresh()">Actualizar acceso</button>
+          <button class="secondary-action" type="button" [disabled]="busy() || checking()" (click)="disconnect()">Desvincular Google</button>
         </div>
       }
-    } @else {
-      <p class="storage-note">Conectate a internet para comprobar el acceso a Google Cloud.</p>
+    } @else if (!checking()) {
+      <p class="storage-note">No se pudo comprobar el acceso a Google Cloud. Podés descargar tu resumen igual.</p>
+      <div class="study-actions"><button class="secondary-action" type="button" (click)="refresh()">Reintentar conexión</button></div>
     }
     <p class="error" role="alert">{{ error() }}</p>
-    <p class="status" role="status">{{ status() }}</p>
-    @if (syncedUrl()) { <a class="back-link" [href]="syncedUrl()" target="_blank" rel="noopener noreferrer">Abrir el notebook actualizado</a> }
+    @if (syncedUrl()) { <a class="back-link" [href]="syncedUrl()" target="_blank" rel="noopener noreferrer">Abrir el notebook actualizado <span class="sr-only">(pestaña nueva)</span></a> }
   </section>
 </div>

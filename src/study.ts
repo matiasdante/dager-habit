@@ -1,18 +1,21 @@
-import { Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
+import { Component, DestroyRef, Injector, afterNextRender, computed, inject, input, output, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
-import { BookDetail, StudyTarget } from './book-detail';
+import { BookDetail, StudyTarget, downloadFile } from './book-detail';
 import { NotebookPanel } from './notebook';
 import {
-  Attempt, Book, Feedback, Session, Study, bonus, emptyStudy, isFeedback, localDay,
+  Attempt, Book, Feedback, Session, Study, bonus, emptyStudy, formatStudyDay, isFeedback, localDay,
   makeBackup, parseBackup, progress, readStudy, restoreBackup, reviewSchedule, updateStudy,
 } from './study-data';
 
 type EvaluationType = 'brain_dump' | 'exam' | 'review';
 interface Provider { id: string; name: string; model: string }
 const evaluationPreferences = 'dager-habit-evaluation';
+const studySteps = ['scan', 'read', 'recall', 'exam', 'done'] as const;
 
 @Component({ selector: 'app-study', templateUrl: './study.html', imports: [NgTemplateOutlet, BookDetail, NotebookPanel] })
 export class StudyPanel {
+  readonly formatDay = formatStudyDay;
+  readonly steps = studySteps;
   readonly feedbackXp = bonus;
   readonly database = input.required<IDBDatabase>();
   readonly books = input.required<Book[]>();
@@ -66,6 +69,7 @@ export class StudyPanel {
   });
 
   private readonly destroyRef = inject(DestroyRef);
+  private readonly injector = inject(Injector);
   private readonly beforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
   private readonly onReconnect = () => void this.checkConnection();
   private channel?: BroadcastChannel;
@@ -118,23 +122,31 @@ export class StudyPanel {
     this.channel?.postMessage('restore');
   }
 
-  async start(event: Event, bookId: string, section: string, minutes: string): Promise<void> {
+  async start(event: Event, bookId: string, sectionField: HTMLInputElement, minutes: string): Promise<void> {
     event.preventDefault();
-    if (!section.trim()) {
-      this.error.set('Escribí el nombre de la sección.');
+    if (this.saving()) return;
+    const section = sectionField.value.trim();
+    if (!section) {
+      sectionField.setCustomValidity('Escribí el nombre de la sección.');
+      sectionField.reportValidity();
       return;
     }
     if (!this.books().some(book => book.id === bookId)) return;
     const target = this.studyTarget();
-    const sectionId = target?.bookId === bookId && target.section?.title === section.trim() ? target.section.id : undefined;
-    await this.change(study => {
+    const sectionId = target?.bookId === bookId && target.section?.title === section ? target.section.id : undefined;
+    this.error.set('');
+    this.status.set('');
+    this.saving.set(true);
+    const saved = await this.change(study => {
       if (study.sessions.some(session => session.step !== 'done' && session.bookId === bookId)) return;
       study.sessions.push({
-        id: crypto.randomUUID(), bookId, section: section.trim(), sectionId, minutes: minutes === '15' ? 15 : 10,
+        id: crypto.randomUUID(), bookId, section, sectionId, minutes: minutes === '15' ? 15 : 10,
         step: 'scan', questions: '', questionKind: 'concepto', deadline: null, notes: '', recall: '',
         gaps: '', exam: ['', ''], closedOn: null,
       });
     });
+    this.saving.set(false);
+    if (saved) this.focusAfterRender('step-heading');
   }
 
   saveDraft(session: Session, patch: Partial<Session>): void {
@@ -151,21 +163,26 @@ export class StudyPanel {
     const candidate = { ...session, ...patch };
     if ((session.step === 'scan' && !candidate.questions.trim()) ||
         (session.step === 'recall' && !candidate.recall.trim())) {
-      this.error.set('Completá el texto antes de continuar.');
+      this.showInvalidField(event, session.step === 'scan' ? '#scan-questions' : '#recall-text', 'Completá el texto antes de continuar.');
       return;
     }
     if (session.step === 'exam') {
-      candidate.exam = candidate.exam.map(question => question.trim()).filter(Boolean);
-      if (candidate.exam.length < 2 || new Set(candidate.exam.map(question => question.toLocaleLowerCase())).size !== candidate.exam.length) {
-        this.error.set('Escribí de 2 a 4 preguntas distintas.');
-        return;
+      const seen = new Set<string>();
+      for (const [index, text] of candidate.exam.entries()) {
+        const question = text.trim().toLocaleLowerCase();
+        if (!question && index >= 2) continue;
+        if (!question || seen.has(question)) {
+          this.showInvalidField(event, '#exam-' + index, question ? 'Escribí una pregunta distinta.' : 'Completá esta pregunta.');
+          return;
+        }
+        seen.add(question);
       }
+      candidate.exam = candidate.exam.map(question => question.trim()).filter(Boolean);
     }
     this.saving.set(true);
     try {
-      const steps = ['scan', 'read', 'recall', 'exam', 'done'] as const;
-      const step = steps[steps.indexOf(session.step) + 1];
-      await this.change(study => {
+      const step = studySteps[studySteps.indexOf(session.step) + 1];
+      const saved = await this.change(study => {
         const target = study.sessions.find(item => item.id === session.id && item.step === session.step);
         if (!target || !step) return;
         Object.assign(target, patch, { step });
@@ -174,6 +191,12 @@ export class StudyPanel {
           target.closedOn = localDay();
         }
       });
+      if (saved) {
+        if (step === 'done') this.status.set('Sesión completada. Encontrá las preguntas en Hoy cuando toque repasarlas.');
+        this.focusAfterRender(step === 'done'
+          ? (this.draft() ? 'step-heading' : 'completed-heading')
+          : 'step-heading');
+      }
     } finally { this.saving.set(false); }
   }
 
@@ -181,15 +204,56 @@ export class StudyPanel {
     return Array.from(fields.querySelectorAll('textarea'), field => field.value);
   }
 
-  startTimer(session: Session): void {
-    if (!session.deadline) this.saveDraft(session, { deadline: Date.now() + session.minutes * 60_000 });
+  saveExam(session: Session, form: HTMLFormElement): void {
+    for (const field of form.querySelectorAll('textarea')) field.setCustomValidity('');
+    this.saveDraft(session, { exam: this.updateExam(form) });
+  }
+
+  async addQuestion(session: Session, form: HTMLFormElement): Promise<void> {
+    const fields = this.updateExam(form);
+    if (fields.length >= 4 || this.saving()) return;
+    const saved = await this.change(study => {
+      const target = study.sessions.find(item => item.id === session.id && item.step === 'exam');
+      if (target) target.exam = [...fields, ''];
+    });
+    if (saved) this.focusAfterRender('exam-' + fields.length);
+  }
+
+  async discardSession(session: Session, dialog: HTMLDialogElement): Promise<void> {
+    if (this.saving()) return;
+    this.saving.set(true);
+    this.error.set('');
+    const saved = await this.change(study => {
+      study.sessions = study.sessions.filter(item => item.id !== session.id || item.step === 'done');
+    });
+    this.saving.set(false);
+    dialog.close();
+    if (saved) {
+      this.status.set('Borrador descartado.');
+      this.focusAfterRender(this.draft() ? 'step-heading' : 'new-session-heading');
+    }
+  }
+
+  async startTimer(session: Session): Promise<void> {
+    if (session.deadline || this.saving()) return;
+    const saved = await this.change(study => {
+      const target = study.sessions.find(item => item.id === session.id && item.step === 'read');
+      if (target && !target.deadline) target.deadline = Date.now() + session.minutes * 60_000;
+    });
+    if (saved) this.focusAfterRender('study-timer');
+  }
+
+  openReview(key: string): void {
+    this.reviewing.set(key);
+    this.error.set('');
+    this.focusAfterRender('review-answer');
   }
 
   async answer(event: SubmitEvent, session: Session, question: number, answer: string): Promise<void> {
     event.preventDefault();
     if (this.saving()) return;
     if (!answer.trim()) {
-      this.error.set('Escribí tu respuesta antes de guardar.');
+      this.showInvalidField(event, '#review-answer', 'Escribí tu respuesta antes de guardar.');
       return;
     }
     this.saving.set(true);
@@ -209,7 +273,7 @@ export class StudyPanel {
       if (this.study().attempts.some(attempt => attempt.id === id)) {
         this.reviewing.set('');
         this.status.set('Repaso guardado.');
-        (event.target as HTMLFormElement | null)?.reset();
+        this.focusAfterRender('reviews-heading');
       }
     } finally { this.saving.set(false); }
   }
@@ -298,12 +362,7 @@ export class StudyPanel {
   async exportData(): Promise<void> {
     try {
       const backup = await makeBackup(this.database());
-      const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }));
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'dager-habit-' + this.today() + '.json';
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      downloadFile(JSON.stringify(backup, null, 2), 'dager-habit-' + this.today() + '.json', 'application/json');
     } catch { this.error.set('No se pudo generar el respaldo.'); }
   }
 
@@ -315,8 +374,13 @@ export class StudyPanel {
     if (!file) return;
     try {
       const backup = file.size <= 10 * 1024 * 1024 ? parseBackup(await file.text()) : null;
-      if (backup) this.restoreFile.set({ name: file.name, backup });
-      else this.error.set('El archivo no es un respaldo válido de hasta 10 MB.');
+      if (backup) {
+        this.restoreFile.set({ name: file.name, backup });
+        this.focusAfterRender('restore-heading');
+      } else {
+        this.error.set('Elegí un respaldo JSON válido de hasta 10 MB.');
+        this.focusAfterRender('study-error');
+      }
     } catch { this.error.set('No se pudo leer el archivo.'); }
   }
 
@@ -332,6 +396,7 @@ export class StudyPanel {
       this.channel?.postMessage('restore');
       this.error.set('');
       this.status.set('Respaldo restaurado.');
+      this.focusAfterRender('backup-file');
     } catch { this.error.set('No se pudo restaurar el respaldo.'); }
     finally { this.saving.set(false); }
   }
@@ -396,13 +461,31 @@ export class StudyPanel {
     this.model.set(preferred && typeof saved?.model === 'string' ? saved.model : '');
   }
 
-  private async change(update: (current: Study) => void): Promise<void> {
+  private showInvalidField(event: Event, selector: string, text: string): void {
+    const field = (event.target as HTMLFormElement).querySelector<HTMLInputElement | HTMLTextAreaElement>(selector);
+    field?.setCustomValidity(text);
+    field?.reportValidity();
+  }
+
+  private focusAfterRender(id: string): void {
+    const view = this.view();
+    afterNextRender(() => {
+      const target = document.getElementById(id);
+      if (view === this.view() && !target?.closest('[hidden]')) target?.focus();
+    }, { injector: this.injector });
+  }
+
+  private async change(update: (current: Study) => void): Promise<boolean> {
     if (!this.pendingWrites()) window.addEventListener('beforeunload', this.beforeUnload);
     this.pendingWrites.update(count => count + 1);
     try {
       this.study.set(await updateStudy(this.database(), update));
       this.channel?.postMessage('study');
-    } catch { this.error.set('No se pudo guardar el progreso. Volvé a intentar.'); }
+      return true;
+    } catch {
+      this.error.set('No se pudo guardar el progreso. Volvé a intentar.');
+      return false;
+    }
     finally {
       this.pendingWrites.update(count => count - 1);
       if (!this.pendingWrites()) window.removeEventListener('beforeunload', this.beforeUnload);

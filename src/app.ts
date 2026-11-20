@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, Injector, afterNextRender, computed, effect, inject, signal } from '@angular/core';
 import { Book, coverUrl, readingPercent } from './study-data';
 import { StudyTarget } from './book-detail';
 import { StudyPanel } from './study';
@@ -19,6 +19,7 @@ const initialBooks: Book[] = [
 type View = 'library' | 'today' | 'study' | 'settings' | 'book' | 'notebook';
 type CatalogMatch = Pick<Book, 'title' | 'author' | 'coverId'> & { workId: string; editionId?: string };
 const routes = { library: '/', today: '/hoy', study: '/estudiar', settings: '/ajustes', notebook: '/notebook' };
+const viewTitles = { library: 'Biblioteca', today: 'Hoy', study: 'Sesión de estudio', settings: 'Ajustes', notebook: 'NotebookLM' };
 
 @Component({
   selector: 'app-root',
@@ -26,6 +27,7 @@ const routes = { library: '/', today: '/hoy', study: '/estudiar', settings: '/aj
   imports: [StudyPanel],
 })
 export class App {
+  private readonly injector = inject(Injector);
   private readonly books = signal<Book[]>([]);
   private readonly collator = new Intl.Collator('es-AR', { sensitivity: 'base', numeric: true });
   readonly database = signal<IDBDatabase | null>(null);
@@ -37,14 +39,12 @@ export class App {
     const book = target && this.books().find(item => item.id === target.bookId);
     return book ? { bookId: book.id, section: book.sections?.find(section => section.id === target?.sectionId) } : null;
   });
-  readonly catalog = signal<CatalogMatch[] | null>(null);
+  readonly catalog = signal<CatalogMatch[]>([]);
+  readonly catalogStatus = signal('');
+  readonly catalogError = signal('');
   readonly searching = signal(false);
   readonly covers = coverUrl;
   readonly percent = readingPercent;
-
-  navigate(view: keyof typeof routes): void {
-    this.go(routes[view]);
-  }
 
   selectStudy(target?: StudyTarget | void): void {
     const query = target?.section ? '?seccion=' + encodeURIComponent(target.section.id) : '';
@@ -53,12 +53,6 @@ export class App {
 
   bookLink(id: string): string {
     return '#/libros/' + encodeURIComponent(id);
-  }
-
-  skip(event: Event): void {
-    event.preventDefault();
-    const id = this.view() === 'library' ? 'library-title' : this.view() + '-heading';
-    document.getElementById(id)?.focus();
   }
 
   private go(path: string): void {
@@ -85,7 +79,10 @@ export class App {
     } else {
       this.view.set((Object.keys(routes) as (keyof typeof routes)[]).find(route => routes[route] === path) ?? 'library');
     }
-    if (focus) requestAnimationFrame(() => document.querySelector<HTMLElement>('main:not([hidden]) h1')?.focus());
+    if (focus) afterNextRender(() => {
+      const main = document.getElementById('main-content');
+      (main?.querySelector<HTMLElement>('h1:not([hidden] *)') ?? main)?.focus();
+    }, { injector: this.injector });
   }
 
   replaceBooks(books: Book[]): void {
@@ -96,6 +93,7 @@ export class App {
     this.collator.compare(a.title, b.title) || this.collator.compare(a.author, b.author),
   ));
   readonly error = signal('');
+  readonly storageError = signal('');
   readonly status = signal('');
   readonly ready = signal(false);
   readonly saving = signal(false);
@@ -103,6 +101,13 @@ export class App {
 
   constructor() {
     this.readRoute();
+    effect(() => {
+      const view = this.view();
+      const title = view === 'book'
+        ? this.books().find(book => book.id === this.bookId())?.title ?? 'Ficha del libro'
+        : viewTitles[view];
+      document.title = title + ' · Dager Habit';
+    });
     const routeListener = () => this.readRoute(true);
     window.addEventListener('hashchange', routeListener);
     inject(DestroyRef).onDestroy(() => window.removeEventListener('hashchange', routeListener));
@@ -132,7 +137,7 @@ export class App {
       const read = database.transaction('books').objectStore('books').getAll();
       read.onsuccess = () => {
         this.books.set(read.result);
-        this.error.set('');
+        this.storageError.set('');
         this.loading.set(false);
         this.ready.set(true);
       };
@@ -161,24 +166,38 @@ export class App {
     });
   }
 
-  async searchBooks(event: Event, query: string): Promise<void> {
+  async searchBooks(event: Event, input: HTMLInputElement): Promise<void> {
     event.preventDefault();
-    if (this.searching() || !query.trim()) return;
-    this.error.set('');
-    this.catalog.set(null);
+    if (this.searching()) return;
+    const query = input.value.trim();
+    if (query.length < 2) {
+      input.setCustomValidity('Escribí al menos dos caracteres.');
+      input.reportValidity();
+      return;
+    }
+    this.catalogError.set('');
+    this.catalogStatus.set('Buscando en Open Library…');
+    this.catalog.set([]);
     this.searching.set(true);
     try {
-      const response = await fetch('/api/catalog?q=' + encodeURIComponent(query.trim()));
+      const response = await fetch('/api/catalog?q=' + encodeURIComponent(query));
       if (!response.ok) throw new Error('Catalog unavailable');
-      this.catalog.set(await response.json() as CatalogMatch[]);
-    } catch { this.error.set('No se pudo buscar en Open Library. Podés agregar el libro manualmente.'); }
+      const matches = await response.json() as CatalogMatch[];
+      this.catalog.set(matches);
+      this.catalogStatus.set(matches.length === 1 ? '1 resultado' : matches.length
+        ? matches.length + ' resultados'
+        : 'No encontramos coincidencias. Probá con otra búsqueda o agregá el libro manualmente.');
+    } catch {
+      this.catalogStatus.set('');
+      this.catalogError.set('No se pudo buscar en Open Library. Volvé a intentar o agregá el libro manualmente.');
+    }
     finally { this.searching.set(false); }
   }
 
   async importBook(match: CatalogMatch): Promise<void> {
-    if (this.saving()) return;
+    if (this.saving() || !this.ready()) return;
     this.saving.set(true);
-    this.error.set('');
+    this.catalogError.set('');
     try {
       const parameters = new URLSearchParams({ work: match.workId });
       if (match.editionId) parameters.set('edition', match.editionId);
@@ -190,14 +209,16 @@ export class App {
         id: crypto.randomUUID(), catalogId, title: match.title, author: match.author,
         summary: detail.summary ?? undefined, totalPages: detail.totalPages ?? undefined,
         coverId: detail.coverId ?? match.coverId ?? undefined,
-      }, id => this.go(this.bookLink(id).slice(1)));
+      }, id => {
+        if (this.view() === 'library') this.go(this.bookLink(id).slice(1));
+      }, message => this.catalogError.set(message));
     } catch {
       this.saving.set(false);
-      this.error.set('No se pudo cargar la ficha del catálogo. Volvé a intentar o agregala manualmente.');
+      this.catalogError.set('No se pudo cargar la ficha del catálogo. Volvé a intentar o agregala manualmente.');
     }
   }
 
-  private saveBook(book: Book, complete: (id: string) => void): void {
+  private saveBook(book: Book, complete: (id: string) => void, reportError = (message: string) => this.error.set(message)): void {
     const database = this.database();
     if (!database) {
       this.saving.set(false);
@@ -232,17 +253,19 @@ export class App {
     transaction.oncomplete = () => {
       this.books.set(read.result);
       this.saving.set(false);
-      this.status.set(`Agregaste «${book.title}» a la biblioteca.`);
+      this.status.set(savedId === book.id
+        ? `Agregaste «${book.title}» a la biblioteca.`
+        : `«${book.title}» ya estaba en tu biblioteca.`);
       complete(savedId);
     };
     transaction.onabort = () => {
       this.saving.set(false);
-      this.error.set('No se pudo guardar el libro. Volvé a intentar.');
+      reportError('No se pudo guardar el libro. Volvé a intentar.');
     };
   }
 
   private showStorageError(message: string): void {
-    this.error.set(message);
+    this.storageError.set(message);
     this.loading.set(false);
     this.ready.set(false);
   }

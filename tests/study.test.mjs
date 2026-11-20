@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addDays, localDay, parseBackup, progress, readingPercent, reminderCalendar, reviewSchedule } from '../src/study-data.ts';
+import { addDays, formatStudyDay, localDay, parseBackup, progress, readingPercent, reminderCalendar, reviewSchedule } from '../src/study-data.ts';
 
 const session = {
   id: 'session', bookId: 'book', section: 'Capítulo 1', minutes: 10, step: 'done',
@@ -47,6 +47,10 @@ test('usa días de Buenos Aires y atraviesa fin de mes', () => {
   assert.equal(localDay(Date.parse('2026-11-21T02:59:59Z')), '2026-11-20');
   assert.equal(localDay(Date.parse('2026-11-21T03:00:00Z')), '2026-11-21');
   assert.equal(addDays('2026-11-30', 2), '2026-12-02');
+});
+
+test('muestra la fecha guardada sin desplazarla por el huso horario', () => {
+  assert.equal(formatStudyDay('2026-11-20'), '20 nov 2026');
 });
 
 test('respeta 2-3-5-7 y termina al cuarto acierto', () => {

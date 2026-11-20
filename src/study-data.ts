@@ -125,6 +125,12 @@ export function addDays(day: string, count: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+const studyDayFormat = new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeZone: 'UTC' });
+
+export function formatStudyDay(day: string): string {
+  return studyDayFormat.format(new Date(day + 'T00:00:00Z'));
+}
+
 export function reviewSchedule(session: Session, question: number, attempts: Attempt[]) {
   let due = session.closedOn ? addDays(session.closedOn, 2) : null;
   let stage = 0;

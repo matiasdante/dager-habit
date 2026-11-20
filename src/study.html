@@ -1,14 +1,18 @@
 <div class="study-page">
   <p role="status" class="status">{{ status() }}</p>
-  <p role="alert" class="error">{{ error() }}</p>
+  <p id="study-error" tabindex="-1" role="alert" class="error">{{ error() }}</p>
   @if (!loaded()) {
-    <p>Cargando progreso…</p>
+    @if (!error()) { <p role="status">Cargando progreso…</p> }
   } @else {
     @switch (view()) {
       @case ('today') {
         <header class="study-heading">
           <h1 id="today-heading" tabindex="-1">Hoy</h1>
-          <button class="primary-action" type="button" (click)="openStudy.emit()">{{ draft() ? 'Continuar sesión' : 'Empezar sesión' }}</button>
+          @if (books().length) {
+            <button class="primary-action" type="button" (click)="openStudy.emit()">{{ draft() ? 'Continuar sesión' : 'Empezar sesión' }}</button>
+          } @else {
+            <a class="primary-action" href="#/">Ir a la biblioteca</a>
+          }
         </header>
         <dl class="progress-data">
           <div><dt>Nivel</dt><dd>{{ stats().level }}</dd></div>
@@ -29,22 +33,22 @@
           </section>
         }
         <section class="study-card">
-          <h2>Repasos pendientes</h2>
+          <h2 id="reviews-heading" tabindex="-1">Repasos pendientes</h2>
           @for (item of due(); track item.key) {
             <article class="review-row">
-              <p class="storage-note">{{ title(item.session.bookId) }} · {{ item.session.section }} · {{ item.due }}</p>
+              <p class="storage-note">{{ title(item.session.bookId) }} · {{ item.session.section }} · {{ formatDay(item.due!) }}</p>
               <h3>{{ item.question }}</h3>
               @if (reviewing() === item.key) {
-                <form class="study-form" (submit)="answer($event, item.session, item.index, reviewAnswer.value)">
+                <form class="study-form" autocomplete="off" (submit)="answer($event, item.session, item.index, reviewAnswer.value)">
                   <label for="review-answer">Tu respuesta</label>
-                  <textarea #reviewAnswer id="review-answer" rows="4" maxlength="4000" required></textarea>
+                  <textarea #reviewAnswer id="review-answer" name="review-answer" rows="4" maxlength="4000" required (input)="reviewAnswer.setCustomValidity('')"></textarea>
                   <div class="study-actions">
                     <button class="primary-action" value="remembered" [disabled]="saving()">Recordé</button>
                     <button class="secondary-action" value="retry" [disabled]="saving()">Me costó</button>
                   </div>
                 </form>
               } @else {
-                <button class="secondary-action" type="button" (click)="reviewing.set(item.key)">Responder</button>
+                <button class="secondary-action" type="button" (click)="openReview(item.key)">Responder <span class="sr-only">{{ item.question }}</span></button>
               }
             </article>
           } @empty { <p>No tenés repasos pendientes para hoy.</p> }
@@ -55,7 +59,7 @@
             @for (attempt of lastAttempts(); track attempt.id) {
               @if (sessionFor(attempt); as session) {
                 <article class="review-row">
-                  <p class="storage-note">{{ attempt.day }} · {{ title(session.bookId) }}</p>
+                  <p class="storage-note">{{ formatDay(attempt.day) }} · {{ title(session.bookId) }}</p>
                   <h3>{{ session.exam[attempt.question] }}</h3>
                   <p class="written-text">{{ attempt.answer }}</p>
                   <details><summary>Ver referencia de la sesión</summary>
@@ -86,92 +90,106 @@
             }
           </div>
         }
-        @if (draft(); as session) {
+        @if (draft(); as active) {
+          @for (session of [active]; track session.id) {
           <section class="study-card focus-card" aria-labelledby="step-heading">
-            <p class="storage-note">{{ title(session.bookId) }} · {{ session.section }}</p>
+            <p class="storage-note">{{ title(session.bookId) }} · {{ session.section }} · Paso {{ steps.indexOf(session.step) + 1 }} de 4</p>
             @if (pendingWrites()) { <p class="storage-note">Guardando borrador…</p> }
             @switch (session.step) {
               @case ('scan') {
-                <h2 id="step-heading">Antes de leer</h2>
-                <form class="study-form" (submit)="advance($event, session, { questions: scanQuestions.value })">
+                <h2 id="step-heading" tabindex="-1">Antes de leer</h2>
+                <form class="study-form" autocomplete="off" (submit)="advance($event, session, { questions: scanQuestions.value })">
                   <label for="question-kind">Tipo de pregunta</label>
-                  <select id="question-kind" [value]="session.questionKind" (change)="saveDraft(session, { questionKind: $any($event.target).value })">
+                  <select id="question-kind" name="question-kind" [value]="session.questionKind" (change)="saveDraft(session, { questionKind: $any($event.target).value })">
                     <option>concepto</option><option>método</option><option>crítica</option>
                   </select>
                   <label for="scan-questions">¿Qué querés entender?</label>
-                  <textarea #scanQuestions id="scan-questions" rows="4" required maxlength="3000" [defaultValue]="session.questions" (input)="saveDraft(session, { questions: scanQuestions.value })"></textarea>
+                  <textarea #scanQuestions id="scan-questions" name="scan-questions" rows="4" required maxlength="3000" [defaultValue]="session.questions" (input)="scanQuestions.setCustomValidity(''); saveDraft(session, { questions: scanQuestions.value })"></textarea>
                   <button class="primary-action" [disabled]="saving()">Pasar a la lectura</button>
                 </form>
               }
               @case ('read') {
-                <h2 id="step-heading">Lectura enfocada</h2>
-                <p class="timer" [attr.aria-label]="session.deadline ? 'Tiempo restante' : 'Duración elegida'">{{ session.deadline ? remaining() : session.minutes + ':00' }}</p>
+                <h2 id="step-heading" tabindex="-1">Lectura enfocada</h2>
+                <p class="timer" id="study-timer" role="timer" tabindex="-1" [attr.aria-label]="session.deadline ? 'Tiempo restante' : 'Duración elegida'">{{ session.deadline ? remaining() : session.minutes + ':00' }}</p>
                 @if (!session.deadline) { <button class="secondary-action" type="button" (click)="startTimer(session)">Iniciar temporizador</button> }
-                @if (session.deadline && remaining() === '00:00') { <p role="status">Terminó el tiempo de lectura.</p> }
-                <form class="study-form" (submit)="advance($event, session, { notes: notes.value })">
+                <p role="status">{{ session.deadline && remaining() === '00:00' ? 'Terminó el tiempo de lectura. Podés continuar.' : '' }}</p>
+                <form class="study-form" autocomplete="off" (submit)="advance($event, session, { notes: notes.value })">
                   <label for="reading-notes">Apuntes opcionales</label>
-                  <textarea #notes id="reading-notes" rows="4" maxlength="5000" [defaultValue]="session.notes" (input)="saveDraft(session, { notes: notes.value })"></textarea>
+                  <textarea #notes id="reading-notes" name="reading-notes" rows="4" maxlength="5000" [defaultValue]="session.notes" (input)="saveDraft(session, { notes: notes.value })"></textarea>
                   <button class="primary-action" [disabled]="saving()">Marcar lectura hecha</button>
                 </form>
               }
               @case ('recall') {
-                <h2 id="step-heading">Volcado de memoria</h2>
+                <h2 id="step-heading" tabindex="-1">Volcado de memoria</h2>
                 <p>Cerrá el material y explicá con tus palabras lo que recordás.</p>
-                <form class="study-form" (submit)="advance($event, session, { recall: recall.value, gaps: gaps.value })">
+                <form class="study-form" autocomplete="off" (submit)="advance($event, session, { recall: recall.value, gaps: gaps.value })">
                   <label for="recall-text">Lo que recordás</label>
-                  <textarea #recall id="recall-text" rows="6" required maxlength="4000" [defaultValue]="session.recall" (input)="saveDraft(session, { recall: recall.value })"></textarea>
-                  <label for="gaps">Lagunas para revisar</label>
-                  <textarea #gaps id="gaps" rows="2" maxlength="1500" [defaultValue]="session.gaps" (input)="saveDraft(session, { gaps: gaps.value })"></textarea>
+                  <textarea #recall id="recall-text" name="recall-text" rows="6" required maxlength="4000" [defaultValue]="session.recall" (input)="recall.setCustomValidity(''); saveDraft(session, { recall: recall.value })"></textarea>
+                  <label for="gaps">Qué te falta revisar (opcional)</label>
+                  <textarea #gaps id="gaps" name="gaps" rows="2" maxlength="1500" [defaultValue]="session.gaps" (input)="saveDraft(session, { gaps: gaps.value })"></textarea>
                   <button class="primary-action" [disabled]="saving()">Guardar volcado</button>
                 </form>
               }
               @case ('exam') {
-                <h2 id="step-heading">Examen futuro</h2>
+                <h2 id="step-heading" tabindex="-1">Examen futuro</h2>
                 <p>Escribí de 2 a 4 preguntas abiertas para responder en otro momento.</p>
-                <form #examForm class="study-form" (submit)="advance($event, session, { exam: updateExam(examForm) })">
+                <form #examForm class="study-form" autocomplete="off" (submit)="advance($event, session, { exam: updateExam(examForm) })">
                   @for (question of session.exam; track $index) {
-                    <label [attr.for]="'exam-' + $index">Pregunta {{ $index + 1 }}</label>
-                    <textarea [id]="'exam-' + $index" rows="2" maxlength="600" [required]="$index < 2" [defaultValue]="question" (input)="saveDraft(session, { exam: updateExam(examForm) })"></textarea>
+                    <label [attr.for]="'exam-' + $index">Pregunta {{ $index + 1 }}{{ $index < 2 ? '' : ' (opcional)' }}</label>
+                    <textarea [id]="'exam-' + $index" [name]="'exam-' + $index" rows="2" maxlength="600" [required]="$index < 2" [defaultValue]="question" (input)="saveExam(session, examForm)"></textarea>
                   }
                   <div class="study-actions">
                     @if (session.exam.length < 4) {
-                      <button class="secondary-action" type="button" (click)="saveDraft(session, { exam: [...updateExam(examForm), ''] })">Agregar pregunta</button>
+                      <button class="secondary-action" type="button" [disabled]="saving()" (click)="addQuestion(session, examForm)">Agregar pregunta</button>
                     }
                     <button class="primary-action" [disabled]="saving()">Cerrar sesión</button>
                   </div>
                 </form>
               }
             }
+            <button class="secondary-action discard-action" type="button" [disabled]="saving()" (click)="discard.showModal()">Descartar borrador</button>
+            <dialog #discard class="study-card confirm-dialog" aria-labelledby="discard-heading" aria-describedby="discard-description">
+              <h2 id="discard-heading">¿Descartar el borrador?</h2>
+              <p id="discard-description">Se van a perder los textos de esta sesión en curso.</p>
+              <div class="study-actions">
+                <form method="dialog"><button class="secondary-action" autofocus [disabled]="saving()">Seguir estudiando</button></form>
+                <button class="primary-action" type="button" [disabled]="saving()" (click)="discardSession(session, discard)">Descartar borrador</button>
+              </div>
+            </dialog>
           </section>
+          }
         } @else {
           <section class="study-card focus-card">
-            <h2>Nueva sesión</h2>
+            <h2 id="new-session-heading" tabindex="-1">Nueva sesión</h2>
             @if (books().length) {
-              <form class="study-form" (submit)="start($event, preferredBook()?.id ?? selectedBook.value, section.value, duration.value)">
+              <form class="study-form" autocomplete="off" (submit)="start($event, preferredBook()?.id ?? selectedBook.value, section, duration.value)">
                 <label for="study-book">Libro</label>
                 @if (preferredBook(); as book) {
-                  <input id="study-book" [value]="book.title" readonly>
+                  <input id="study-book" name="study-book" [value]="book.title" readonly>
                 }
-                <select #selectedBook [id]="preferredBook() ? 'study-book-selector' : 'study-book'" [hidden]="!!preferredBook()">
+                <select #selectedBook name="study-book" [id]="preferredBook() ? 'study-book-selector' : 'study-book'" [hidden]="!!preferredBook()">
                   @for (book of books(); track book.id) { <option [value]="book.id" [selected]="preferredBook()?.id === book.id">{{ book.title }}</option> }
                 </select>
                 <label for="study-section">Sección</label>
-                <input #section id="study-section" required maxlength="160" [value]="studyTarget()?.section?.title ?? ''" [readOnly]="!!studyTarget()?.section">
+                <input #section id="study-section" name="study-section" required maxlength="160" [value]="studyTarget()?.section?.title ?? ''" [readOnly]="!!studyTarget()?.section" (input)="section.setCustomValidity('')">
                 <label for="study-duration">Duración</label>
-                <select #duration id="study-duration"><option value="10">10 minutos</option><option value="15">15 minutos</option></select>
-                <button class="primary-action">Preparar lectura</button>
+                <select #duration id="study-duration" name="study-duration"><option value="10">10 minutos</option><option value="15">15 minutos</option></select>
+                <button class="primary-action" [disabled]="saving()">Preparar lectura</button>
               </form>
-            } @else { <p>Agregá un libro a la biblioteca para empezar.</p> }
+            } @else { <p>Para empezar, <a href="#/">agregá un libro a la biblioteca</a>.</p> }
           </section>
         }
         @if (completed().length && draft()?.step !== 'read' && draft()?.step !== 'recall') {
           <section class="study-card">
-            <h2>Sesiones completadas</h2>
-            <p class="storage-note">{{ canEvaluate() ? 'Al pedir una evaluación, enviás el título y los textos necesarios a ' + selectedProvider()?.name + '.' : 'Configurá un proveedor en Ajustes para recibir devoluciones.' }}</p>
+            <h2 id="completed-heading" tabindex="-1">Sesiones completadas</h2>
+            <p class="storage-note">
+              @if (canEvaluate()) { Al pedir una evaluación, enviás el título y los textos necesarios a {{ selectedProvider()?.name }}. }
+              @else { Configurá un proveedor en <a href="#/ajustes">Ajustes</a> para recibir devoluciones. }
+            </p>
             @for (session of completed(); track session.id) {
               <details class="review-row">
                 <summary>{{ title(session.bookId) }} · {{ session.section }}</summary>
-                <p class="storage-note">Fecha de cierre · {{ session.closedOn }}</p>
+                <p class="storage-note">Fecha de cierre · {{ formatDay(session.closedOn!) }}</p>
                 <div class="study-actions">
                   @if (!session.recallFeedback) { <button class="secondary-action" type="button" [disabled]="!!evaluating() || !canEvaluate()" (click)="evaluate('brain_dump', session)">{{ evaluating() === session.id + 'brain_dump' ? 'Evaluando…' : 'Evaluar volcado' }}</button> }
                   @if (!session.examFeedback) { <button class="secondary-action" type="button" [disabled]="!!evaluating() || !canEvaluate()" (click)="evaluate('exam', session)">{{ evaluating() === session.id + 'exam' ? 'Evaluando…' : 'Evaluar examen' }}</button> }
@@ -210,15 +228,16 @@
           <p>Cuando pedís una evaluación, la app envía el título y el texto al proveedor elegido. Para un repaso también envía la referencia de tu sesión.</p>
           @if (connected()) {
             @if (providers().length) {
-              <form class="study-form" (submit)="saveProvider($event, provider.value, aiModel.value)">
+              <form class="study-form" autocomplete="off" (submit)="saveProvider($event, provider.value, aiModel.value)">
                 <label for="ai-provider">Proveedor</label>
-                <select id="ai-provider" #provider (change)="aiModel.value = ''">
+                <select id="ai-provider" name="ai-provider" #provider (change)="aiModel.value = ''">
                   @for (item of providers(); track item.id) {
                     <option [value]="item.id" [selected]="providerId() === item.id">{{ item.name }}</option>
                   }
                 </select>
                 <label for="ai-model">Modelo (opcional)</label>
-                <input id="ai-model" #aiModel [value]="model()" maxlength="150" [placeholder]="selectedProvider()?.model ?? ''">
+                <input id="ai-model" name="ai-model" #aiModel [value]="model()" maxlength="150" spellcheck="false" aria-describedby="ai-model-help">
+                <p id="ai-model-help" class="field-hint">Dejalo vacío para usar el modelo predeterminado del proveedor.</p>
                 <button class="primary-action">Guardar proveedor</button>
               </form>
             } @else { <p class="storage-note">Todavía no hay proveedores configurados en el servidor.</p> }
@@ -226,8 +245,8 @@
           } @else {
             <form class="study-form" (submit)="connect($event, token)">
               <label for="app-token">Token de la app</label>
-              <input #token id="app-token" type="password" autocomplete="off" required minlength="32" maxlength="256">
-              <button class="primary-action" [disabled]="authBusy()">Conectar evaluación</button>
+              <input #token id="app-token" name="app-token" type="password" autocomplete="current-password" required minlength="32" maxlength="256">
+              <button class="primary-action" [disabled]="authBusy()">{{ authBusy() ? 'Conectando…' : 'Conectar evaluación' }}</button>
             </form>
           }
         </section>
@@ -236,14 +255,15 @@
           <p>Descargá tus libros y tu progreso en un archivo JSON.</p>
           <div class="study-actions">
             <button class="secondary-action" type="button" (click)="exportData()">Exportar respaldo</button>
-            <label class="secondary-action file-action">Elegir respaldo<input type="file" accept=".json,application/json" (change)="selectFile($any($event.target))"></label>
+            <label class="secondary-action file-action">Elegir respaldo<input #backupInput id="backup-file" name="backup-file" type="file" accept=".json,application/json" (change)="selectFile(backupInput)"></label>
           </div>
           @if (restoreFile(); as file) {
             <div class="restore-confirm">
+              <h3 id="restore-heading" tabindex="-1">Confirmá la restauración</h3>
               <p><strong>{{ file.name }}</strong> reemplazará la biblioteca y el progreso de este dispositivo.</p>
               <div class="study-actions">
                 <button class="primary-action" type="button" [disabled]="saving() || !!evaluating()" (click)="restore()">Confirmar restauración</button>
-                <button class="secondary-action" type="button" (click)="restoreFile.set(null)">Cancelar</button>
+                <button class="secondary-action" type="button" [disabled]="saving()" (click)="restoreFile.set(null); backupInput.focus()">Cancelar</button>
               </div>
             </div>
           }

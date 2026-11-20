@@ -1,5 +1,5 @@
 import { Component, computed, input, signal } from '@angular/core';
-import { Book, Session, readingPercent } from './study-data';
+import { Book, Session, formatStudyDay, readingPercent } from './study-data';
 import { downloadFile } from './book-detail';
 
 interface Notebook {
@@ -22,6 +22,7 @@ export class NotebookPanel {
   readonly sessions = input.required<Session[]>();
   readonly bookId = signal('');
   readonly google = signal<NotebookStatus | null>(null);
+  readonly checking = signal(false);
   readonly busy = signal(false);
   readonly error = signal('');
   readonly status = signal('');
@@ -36,7 +37,7 @@ export class NotebookPanel {
     const lines = [book.title, book.author];
     if (progress !== null) lines.push('Avance · ' + (book.page ?? 0) + ' de ' + book.totalPages + ' páginas (' + progress + ' %)');
     for (const session of sessions) {
-      lines.push('', session.section + ' · ' + session.closedOn);
+      lines.push('', session.section + ' · ' + formatStudyDay(session.closedOn!));
       if (session.notes) lines.push('Apuntes', session.notes);
       lines.push('Volcado de memoria', session.recall);
       if (session.gaps) lines.push('Para revisar', session.gaps);
@@ -50,10 +51,25 @@ export class NotebookPanel {
   }
 
   async refresh(): Promise<void> {
+    if (this.checking()) return;
+    this.checking.set(true);
     try {
       const response = await fetch('/api/notebook/status', { cache: 'no-store' });
-      if (response.ok) this.google.set(await response.json() as NotebookStatus);
-    } catch { /* Local summaries and exports are still available. */ }
+      if (!response.ok) throw new Error('Notebook status unavailable');
+      this.google.set(await response.json() as NotebookStatus);
+    } catch { this.google.set(null); }
+    finally { this.checking.set(false); }
+  }
+
+  selectBook(id: string): void {
+    this.bookId.set(id);
+    this.syncedUrl.set('');
+    this.status.set('');
+    this.error.set('');
+  }
+
+  studyLink(book: Book): string {
+    return '#/estudiar/' + encodeURIComponent(book.id);
   }
 
   async connect(): Promise<void> {
@@ -66,7 +82,7 @@ export class NotebookPanel {
       const authorization = new URL(url);
       if (authorization.origin !== 'https://accounts.google.com') throw new Error('Invalid Google sign-in');
       location.assign(authorization);
-    } catch { this.error.set('No se pudo iniciar sesión con Google.'); }
+    } catch { this.error.set('No se pudo iniciar sesión con Google. Volvé a intentar.'); }
     finally { this.busy.set(false); }
   }
 
