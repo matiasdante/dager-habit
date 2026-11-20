@@ -1,4 +1,4 @@
-<a class="skip-link" [href]="view() === 'library' ? '#library-title' : '#' + view() + '-heading'">{{ view() === 'library' ? 'Ir a la colección' : 'Ir al contenido' }}</a>
+<a class="skip-link" [href]="view() === 'library' ? '#library-title' : '#' + view() + '-heading'" (click)="skip($event)">{{ view() === 'library' ? 'Ir a la colección' : 'Ir al contenido' }}</a>
 <header class="site-header">
   <div class="frame header-inner">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Dager Habit</span></div>
@@ -6,9 +6,10 @@
       <button type="button" [attr.aria-current]="view() === 'library' ? 'page' : null" (click)="navigate('library')">Biblioteca</button>
       <button type="button" [attr.aria-current]="view() === 'today' ? 'page' : null" (click)="navigate('today')">Hoy</button>
       <button type="button" [attr.aria-current]="view() === 'study' ? 'page' : null" (click)="navigate('study')">Estudiar</button>
+      <button type="button" [attr.aria-current]="view() === 'notebook' ? 'page' : null" (click)="navigate('notebook')">Notebook</button>
       <button type="button" [attr.aria-current]="view() === 'settings' ? 'page' : null" (click)="navigate('settings')">Ajustes</button>
     </nav>
-    <a class="header-action" [hidden]="view() !== 'library'" href="#book-title" (click)="$event.preventDefault(); title.focus()"><span aria-hidden="true">+</span> Agregar libro</a>
+    <a class="header-action" [hidden]="view() !== 'library'" href="#catalog-query" (click)="$event.preventDefault(); catalogQuery.focus()"><span aria-hidden="true">+</span> Agregar libro</a>
   </div>
 </header>
 
@@ -24,6 +25,25 @@
   <div class="workspace">
     <aside class="entry" aria-labelledby="new-book">
       <h2 id="new-book">Nuevo libro</h2>
+      <form (submit)="searchBooks($event, catalogQuery.value)">
+        <div class="field">
+          <label for="catalog-query">Buscar por título, autor o ISBN</label>
+          <input #catalogQuery id="catalog-query" minlength="2" maxlength="120" required>
+        </div>
+        <button class="primary-action" [disabled]="searching()">{{ searching() ? 'Buscando…' : 'Buscar en Open Library' }}</button>
+      </form>
+      @if (catalog(); as matches) {
+        <ul class="catalog-results" aria-label="Resultados del catálogo">
+          @for (match of matches; track match.workId) {
+            <li>
+              <strong>{{ match.title }}</strong><p>{{ match.author }}</p>
+              <button type="button" class="secondary-action" [disabled]="saving() || !ready()" (click)="importBook(match)">Agregar <span class="sr-only">{{ match.title }}</span></button>
+            </li>
+          } @empty { <li>No encontramos coincidencias.</li> }
+        </ul>
+      }
+      <details class="manual-entry">
+      <summary>Agregar manualmente</summary>
       <form (submit)="addBook($event, title, author)">
         <div class="field">
           <label for="book-title">Título</label>
@@ -37,6 +57,7 @@
           <span aria-hidden="true">+</span> {{ saving() ? 'Guardando…' : 'Agregar a la biblioteca' }}
         </button>
       </form>
+      </details>
       <p class="storage-note">Los libros se guardan en este dispositivo.</p>
       <p class="status" role="status" [class.has-message]="status()">{{ status() }}</p>
       <p class="error" role="alert" [class.has-message]="error()">{{ error() }}</p>
@@ -54,9 +75,14 @@
       } @else if (sortedBooks().length) {
         <ul class="book-list">
           @for (book of sortedBooks(); track book.id; let index = $index) {
-            <li class="book-row">
-              <span class="book-cover" aria-hidden="true" [attr.data-tone]="index % 4"></span>
-              <div class="book-details"><h3>{{ book.title }}</h3><p>{{ book.author }}</p></div>
+            <li>
+              <a class="book-row book-link" [href]="bookLink(book.id)">
+                <span class="book-cover" aria-hidden="true" [attr.data-tone]="index % 4">
+                  @if (book.coverId) { <img [src]="covers(book.coverId)" alt="" loading="lazy" referrerpolicy="no-referrer" (error)="$any($event.target).hidden = true"> }
+                </span>
+                <div class="book-details"><h3>{{ book.title }}</h3><p>{{ book.author }}</p></div>
+                @if (percent(book) !== null) { <span class="book-percent">{{ percent(book) }} %</span> }
+              </a>
             </li>
           }
         </ul>
@@ -71,7 +97,8 @@
   @let currentView = view();
   <main class="frame" [hidden]="currentView === 'library'">
     <app-study [database]="storage" [books]="sortedBooks()" [view]="currentView === 'library' ? 'today' : currentView"
-      (booksRestored)="replaceBooks($event)" (openStudy)="navigate('study')" />
+      [bookId]="bookId()" [studyTarget]="studyTarget()"
+      (booksRestored)="replaceBooks($event)" (openStudy)="selectStudy($event)" />
   </main>
 } @else if (view() !== 'library') {
   <main class="frame"><p role="status">{{ error() || 'Cargando biblioteca…' }}</p></main>

@@ -1,0 +1,97 @@
+<a class="back-link" href="#/">Volver a la biblioteca</a>
+<div class="book-masthead">
+  <div class="edition-cover">
+    @if (book().coverId && !coverFailed()) {
+      <img [src]="coverUrl(book().coverId!)" alt="" loading="lazy" referrerpolicy="no-referrer" (error)="coverFailed.set(true)">
+    } @else { <span class="book-cover" aria-hidden="true"></span> }
+  </div>
+  <div>
+    <h1 id="book-heading" tabindex="-1">{{ book().title }}</h1>
+    <p class="book-author">{{ book().author }}</p>
+    @if (book().summary) { <p class="edition-summary">{{ book().summary }}</p> }
+    <button class="primary-action" type="button" (click)="start()">{{ draft() ? 'Continuar sesión' : 'Empezar sesión' }}</button>
+  </div>
+</div>
+<p class="status" role="status">{{ status() }}</p>
+<p class="error" role="alert">{{ error() }}</p>
+
+<div class="book-workspace">
+  <div class="book-column">
+    <section class="study-card">
+      <h2>Secciones</h2>
+      @for (section of book().sections ?? []; track section.id) {
+        <div class="section-row">
+          <div>
+            <h3>{{ section.title }}</h3>
+            @if (section.endPage) { <p class="storage-note">Hasta la pág. {{ section.endPage }}</p> }
+            @if (studied(section)) { <p class="storage-note">Con sesión completada</p> }
+          </div>
+          <div class="study-actions">
+            @if (section.endPage && section.endPage <= (book().totalPages ?? 0) && section.endPage > (book().page ?? 0)) {
+              <button class="secondary-action" type="button" [disabled]="busy()" (click)="markPages(section)">Marcar leída</button>
+            }
+            <button class="secondary-action" type="button" [disabled]="!!draft() && draft()?.sectionId !== section.id" (click)="start(section)">Estudiar <span class="sr-only">{{ section.title }}</span></button>
+          </div>
+        </div>
+      } @empty { <p>Agregá los capítulos o las secciones que quieras estudiar.</p> }
+      @if (draft()) { <p class="storage-note">Terminá la sesión en curso para cambiar de sección.</p> }
+      <form class="study-form" (submit)="addSection($event, sectionTitle, sectionEnd)">
+        <label for="section-title">Nombre de la sección</label>
+        <input id="section-title" #sectionTitle maxlength="160" required>
+        <label for="section-end">Página final (opcional)</label>
+        <input id="section-end" #sectionEnd type="number" min="1" [max]="book().totalPages ?? maxPages">
+        <button class="secondary-action" [disabled]="busy()">Agregar sección</button>
+      </form>
+    </section>
+    <section class="study-card">
+      <h2>Historial de estudio</h2>
+      @for (session of completed(); track session.id) {
+        <details class="review-row">
+          <summary>{{ session.section }} · {{ session.closedOn }}</summary>
+          <p class="written-text">{{ session.recall }}</p>
+          @if (session.gaps) { <p class="written-text"><strong>Lagunas para revisar</strong><br>{{ session.gaps }}</p> }
+        </details>
+      } @empty { <p>Todavía no completaste sesiones de este libro.</p> }
+    </section>
+  </div>
+  <div class="book-column">
+    <section class="study-card">
+      <h2>Avance de lectura</h2>
+      @if (percent() !== null) {
+        <div class="reading-progress">
+          <progress [value]="book().page ?? 0" [max]="book().totalPages ?? 1" aria-label="Páginas leídas"></progress>
+          <strong>{{ percent() }} %</strong>
+        </div>
+        <p class="storage-note">{{ book().page ?? 0 }} de {{ book().totalPages }} páginas</p>
+      }
+      <form class="study-form" (submit)="saveProgress($event, total, page)">
+        <label for="total-pages">Páginas totales</label>
+        <input id="total-pages" #total type="number" min="1" [max]="maxPages" [value]="book().totalPages ?? ''" required>
+        <label for="current-page">Páginas leídas</label>
+        <input id="current-page" #page type="number" min="0" [value]="book().page ?? 0" required>
+        <button class="primary-action" [disabled]="busy()">Guardar avance</button>
+      </form>
+    </section>
+    <section class="study-card">
+      <h2>Recordatorio</h2>
+      @if (book().reminder; as reminder) {
+        <p>{{ reminder.kind === 'study' ? 'Continuar estudio' : 'Continuar lectura' }} · {{ formatReminder(reminder) }}</p>
+        <div class="study-actions">
+          <button class="secondary-action" type="button" (click)="downloadReminder(reminder)">Descargar para el calendario</button>
+          <button class="secondary-action" type="button" [disabled]="busy()" (click)="clearReminder()">Quitar</button>
+        </div>
+        <p class="storage-note">Importá el archivo en tu calendario para recibir el aviso con Dager Habit cerrado.</p>
+      }
+      <form class="study-form" (submit)="saveReminder($event, reminderAt, reminderKind.value)">
+        <label for="reminder-kind">Actividad</label>
+        <select id="reminder-kind" #reminderKind>
+          <option value="reading">Continuar lectura</option>
+          <option value="study">Continuar estudio</option>
+        </select>
+        <label for="reminder-at">Día y hora</label>
+        <input id="reminder-at" #reminderAt type="datetime-local" required>
+        <button class="primary-action" [disabled]="busy()">{{ book().reminder ? 'Reprogramar recordatorio' : 'Guardar recordatorio' }}</button>
+      </form>
+    </section>
+  </div>
+</div>

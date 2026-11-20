@@ -16,6 +16,18 @@
           <div><dt>Racha</dt><dd>{{ stats().streak }} días</dd></div>
           <div><dt>Comodín semanal</dt><dd>{{ stats().wildcard ? 'Disponible' : 'Usado' }}</dd></div>
         </dl>
+        @if (reminders().length) {
+          <section class="study-card">
+            <h2>Recordatorios de lectura y estudio</h2>
+            @for (item of reminders(); track item.book.id) {
+              <div class="section-row">
+                <div><h3><a [href]="bookUrl(item.book.id)">{{ item.book.title }}</a></h3>
+                  <p class="storage-note">{{ item.reminder.kind === 'study' ? 'Continuar estudio' : 'Continuar lectura' }} · {{ displayDate(item.reminder.at) }}</p></div>
+                @if (item.reminder.at <= now()) { <strong>Para retomar</strong> }
+              </div>
+            }
+          </section>
+        }
         <section class="study-card">
           <h2>Repasos pendientes</h2>
           @for (item of due(); track item.key) {
@@ -53,7 +65,7 @@
                   @if (attempt.feedback; as feedback) {
                     <ng-container [ngTemplateOutlet]="feedbackView" [ngTemplateOutletContext]="{ $implicit: feedback }"></ng-container>
                   } @else {
-                    <button class="secondary-action" type="button" [disabled]="!!evaluating() || !connected()" (click)="evaluate('review', session, attempt)">
+                    <button class="secondary-action" type="button" [disabled]="!!evaluating() || !canEvaluate()" (click)="evaluate('review', session, attempt)">
                       {{ evaluating() === attempt.id ? 'Evaluando…' : 'Evaluar repaso' }}
                     </button>
                   }
@@ -66,6 +78,14 @@
       }
       @case ('study') {
         <header class="study-heading"><h1 id="study-heading" tabindex="-1">Sesión de estudio</h1></header>
+        @if (drafts().length > 1) {
+          <div class="study-actions">
+            @for (active of drafts(); track active.id) {
+              <button class="secondary-action" type="button" [attr.aria-pressed]="draft()?.id === active.id"
+                (click)="openStudy.emit({ bookId: active.bookId })">{{ title(active.bookId) }} · {{ active.section }}</button>
+            }
+          </div>
+        }
         @if (draft(); as session) {
           <section class="study-card focus-card" aria-labelledby="step-heading">
             <p class="storage-note">{{ title(session.bookId) }} · {{ session.section }}</p>
@@ -127,13 +147,16 @@
           <section class="study-card focus-card">
             <h2>Nueva sesión</h2>
             @if (books().length) {
-              <form class="study-form" (submit)="start($event, selectedBook.value, section.value, duration.value)">
+              <form class="study-form" (submit)="start($event, preferredBook()?.id ?? selectedBook.value, section.value, duration.value)">
                 <label for="study-book">Libro</label>
-                <select #selectedBook id="study-book" required>
-                  @for (book of books(); track book.id) { <option [value]="book.id">{{ book.title }}</option> }
+                @if (preferredBook(); as book) {
+                  <input id="study-book" [value]="book.title" readonly>
+                }
+                <select #selectedBook [id]="preferredBook() ? 'study-book-selector' : 'study-book'" [hidden]="!!preferredBook()">
+                  @for (book of books(); track book.id) { <option [value]="book.id" [selected]="preferredBook()?.id === book.id">{{ book.title }}</option> }
                 </select>
                 <label for="study-section">Sección</label>
-                <input #section id="study-section" required maxlength="160">
+                <input #section id="study-section" required maxlength="160" [value]="studyTarget()?.section?.title ?? ''" [readOnly]="!!studyTarget()?.section">
                 <label for="study-duration">Duración</label>
                 <select #duration id="study-duration"><option value="10">10 minutos</option><option value="15">15 minutos</option></select>
                 <button class="primary-action">Preparar lectura</button>
@@ -144,14 +167,14 @@
         @if (completed().length && draft()?.step !== 'read' && draft()?.step !== 'recall') {
           <section class="study-card">
             <h2>Sesiones completadas</h2>
-            <p class="storage-note">{{ connected() ? 'Al pedir una evaluación, enviás a Groq el título del libro y los textos necesarios para esa devolución.' : 'Conectá la evaluación en Ajustes si querés recibir devoluciones de Groq.' }}</p>
+            <p class="storage-note">{{ canEvaluate() ? 'Al pedir una evaluación, enviás el título y los textos necesarios a ' + selectedProvider()?.name + '.' : 'Configurá un proveedor en Ajustes para recibir devoluciones.' }}</p>
             @for (session of completed(); track session.id) {
               <details class="review-row">
                 <summary>{{ title(session.bookId) }} · {{ session.section }}</summary>
                 <p class="storage-note">Fecha de cierre · {{ session.closedOn }}</p>
                 <div class="study-actions">
-                  @if (!session.recallFeedback) { <button class="secondary-action" type="button" [disabled]="!!evaluating() || !connected()" (click)="evaluate('brain_dump', session)">{{ evaluating() === session.id + 'brain_dump' ? 'Evaluando…' : 'Evaluar volcado' }}</button> }
-                  @if (!session.examFeedback) { <button class="secondary-action" type="button" [disabled]="!!evaluating() || !connected()" (click)="evaluate('exam', session)">{{ evaluating() === session.id + 'exam' ? 'Evaluando…' : 'Evaluar examen' }}</button> }
+                  @if (!session.recallFeedback) { <button class="secondary-action" type="button" [disabled]="!!evaluating() || !canEvaluate()" (click)="evaluate('brain_dump', session)">{{ evaluating() === session.id + 'brain_dump' ? 'Evaluando…' : 'Evaluar volcado' }}</button> }
+                  @if (!session.examFeedback) { <button class="secondary-action" type="button" [disabled]="!!evaluating() || !canEvaluate()" (click)="evaluate('exam', session)">{{ evaluating() === session.id + 'exam' ? 'Evaluando…' : 'Evaluar examen' }}</button> }
                 </div>
                 @if (session.recallFeedback; as feedback) {
                   <h3>Devolución del volcado</h3>
@@ -166,13 +189,40 @@
           </section>
         }
       }
+      @case ('book') {
+        @if (currentBook(); as selected) {
+          @for (book of [selected]; track book.id) {
+            <app-book-detail [book]="book" [database]="database()" [sessions]="bookSessions()"
+              (changed)="applyBookChanges($event)" (study)="openStudy.emit($event)" />
+          }
+        } @else {
+          <h1 id="book-heading" tabindex="-1">Libro no disponible</h1>
+          <a href="#/">Volver a la biblioteca</a>
+        }
+      }
+      @case ('notebook') {
+        <app-notebook [books]="books()" [sessions]="completed()" />
+      }
       @case ('settings') {
         <header class="study-heading"><h1 id="settings-heading" tabindex="-1">Ajustes</h1></header>
         <section class="study-card settings-card">
-          <h2>Evaluación con Groq</h2>
-          <p>Cuando pedís una evaluación, la app envía el título y el texto que se evalúa a Groq. Para un repaso también envía la referencia de tu sesión.</p>
+          <h2>Proveedor de IA</h2>
+          <p>Cuando pedís una evaluación, la app envía el título y el texto al proveedor elegido. Para un repaso también envía la referencia de tu sesión.</p>
           @if (connected()) {
-            <button class="secondary-action" type="button" (click)="disconnect()">Desconectar evaluación</button>
+            @if (providers().length) {
+              <form class="study-form" (submit)="saveProvider($event, provider.value, aiModel.value)">
+                <label for="ai-provider">Proveedor</label>
+                <select id="ai-provider" #provider (change)="aiModel.value = ''">
+                  @for (item of providers(); track item.id) {
+                    <option [value]="item.id" [selected]="providerId() === item.id">{{ item.name }}</option>
+                  }
+                </select>
+                <label for="ai-model">Modelo (opcional)</label>
+                <input id="ai-model" #aiModel [value]="model()" maxlength="150" [placeholder]="selectedProvider()?.model ?? ''">
+                <button class="primary-action">Guardar proveedor</button>
+              </form>
+            } @else { <p class="storage-note">Todavía no hay proveedores configurados en el servidor.</p> }
+            <div class="study-actions"><button class="secondary-action" type="button" (click)="disconnect()">Desconectar evaluación</button></div>
           } @else {
             <form class="study-form" (submit)="connect($event, token)">
               <label for="app-token">Token de la app</label>

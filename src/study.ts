@@ -1,25 +1,37 @@
 import { Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
+import { BookDetail, StudyTarget } from './book-detail';
+import { NotebookPanel } from './notebook';
 import {
   Attempt, Book, Feedback, Session, Study, bonus, emptyStudy, isFeedback, localDay,
   makeBackup, parseBackup, progress, readStudy, restoreBackup, reviewSchedule, updateStudy,
 } from './study-data';
 
 type EvaluationType = 'brain_dump' | 'exam' | 'review';
+interface Provider { id: string; name: string; model: string }
+const evaluationPreferences = 'dager-habit-evaluation';
 
-@Component({ selector: 'app-study', templateUrl: './study.html', imports: [NgTemplateOutlet] })
+@Component({ selector: 'app-study', templateUrl: './study.html', imports: [NgTemplateOutlet, BookDetail, NotebookPanel] })
 export class StudyPanel {
   readonly feedbackXp = bonus;
   readonly database = input.required<IDBDatabase>();
   readonly books = input.required<Book[]>();
   readonly booksRestored = output<Book[]>();
-  readonly view = input.required<'today' | 'study' | 'settings'>();
-  readonly openStudy = output<void>();
+  readonly view = input.required<'today' | 'study' | 'settings' | 'book' | 'notebook'>();
+  readonly bookId = input.required<string>();
+  readonly studyTarget = input<StudyTarget | null>(null);
+  readonly openStudy = output<StudyTarget | void>();
 
   readonly study = signal<Study>(emptyStudy());
   readonly now = signal(Date.now());
   readonly today = computed(() => localDay(this.now()));
-  readonly draft = computed(() => this.study().sessions.find(session => session.step !== 'done'));
+  readonly drafts = computed(() => this.study().sessions.filter(session => session.step !== 'done'));
+  readonly draft = computed(() => {
+    const target = this.studyTarget();
+    return target ? this.drafts().find(session => session.bookId === target.bookId) : this.drafts()[0];
+  });
+  readonly currentBook = computed(() => this.books().find(book => book.id === this.bookId()));
+  readonly bookSessions = computed(() => this.study().sessions.filter(session => session.bookId === this.bookId()));
   readonly completed = computed(() => this.study().sessions.filter(session => session.step === 'done').slice().reverse());
   readonly stats = computed(() => progress(this.study(), this.today()));
   readonly reviewing = signal('');
@@ -30,6 +42,11 @@ export class StudyPanel {
   readonly pendingWrites = signal(0);
   readonly evaluating = signal('');
   readonly connected = signal(false);
+  readonly providers = signal<Provider[]>([]);
+  readonly providerId = signal('');
+  readonly model = signal('');
+  readonly selectedProvider = computed(() => this.providers().find(provider => provider.id === this.providerId()));
+  readonly canEvaluate = computed(() => this.connected() && !!this.selectedProvider());
   readonly authBusy = signal(false);
   readonly restoreFile = signal<{ name: string; backup: NonNullable<ReturnType<typeof parseBackup>> } | null>(null);
 
@@ -38,6 +55,9 @@ export class StudyPanel {
     return schedule.due && schedule.due <= this.today()
       ? [{ key: session.id + '/' + index, session, index, question, ...schedule }] : [];
   })).sort((a, b) => a.due!.localeCompare(b.due!)));
+  readonly reminders = computed(() => this.books().flatMap(book => book.reminder ? [{ book, reminder: book.reminder }] : [])
+    .sort((a, b) => a.reminder.at - b.reminder.at));
+  readonly preferredBook = computed(() => this.books().find(book => book.id === this.studyTarget()?.bookId));
 
   readonly remaining = computed(() => {
     const deadline = this.draft()?.deadline;
@@ -85,6 +105,19 @@ export class StudyPanel {
     return this.books().find(book => book.id === bookId)?.title ?? 'Libro';
   }
 
+  bookUrl(bookId: string): string {
+    return '#/libros/' + encodeURIComponent(bookId);
+  }
+
+  displayDate(at: number): string {
+    return new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeStyle: 'short' }).format(at);
+  }
+
+  applyBookChanges(books: Book[]): void {
+    this.booksRestored.emit(books);
+    this.channel?.postMessage('restore');
+  }
+
   async start(event: Event, bookId: string, section: string, minutes: string): Promise<void> {
     event.preventDefault();
     if (!section.trim()) {
@@ -92,10 +125,12 @@ export class StudyPanel {
       return;
     }
     if (!this.books().some(book => book.id === bookId)) return;
+    const target = this.studyTarget();
+    const sectionId = target?.bookId === bookId && target.section?.title === section.trim() ? target.section.id : undefined;
     await this.change(study => {
-      if (study.sessions.some(session => session.step !== 'done')) return;
+      if (study.sessions.some(session => session.step !== 'done' && session.bookId === bookId)) return;
       study.sessions.push({
-        id: crypto.randomUUID(), bookId, section: section.trim(), minutes: minutes === '15' ? 15 : 10,
+        id: crypto.randomUUID(), bookId, section: section.trim(), sectionId, minutes: minutes === '15' ? 15 : 10,
         step: 'scan', questions: '', questionKind: 'concepto', deadline: null, notes: '', recall: '',
         gaps: '', exam: ['', ''], closedOn: null,
       });
@@ -181,7 +216,8 @@ export class StudyPanel {
 
   async evaluate(type: EvaluationType, session: Session, attempt?: Attempt): Promise<void> {
     const property = type === 'brain_dump' ? 'recallFeedback' : 'examFeedback';
-    if (this.evaluating() || (attempt ? attempt.feedback : session[property])) return;
+    const provider = this.selectedProvider();
+    if (!this.connected() || !provider || this.evaluating() || (attempt ? attempt.feedback : session[property])) return;
     const key = attempt?.id ?? session.id + type;
     this.evaluating.set(key);
     this.error.set('');
@@ -191,6 +227,8 @@ export class StudyPanel {
         headers: { 'Content-Type': 'application/json', 'X-Habit-Request': '1' },
         body: JSON.stringify({
           type,
+          provider: provider.id,
+          model: this.model() || undefined,
           bookTitle: this.title(session.bookId),
           questions: attempt ? session.exam[attempt.question] : session.questions,
           content: attempt ? attempt.answer : type === 'exam'
@@ -200,7 +238,7 @@ export class StudyPanel {
       });
       if (response.status === 401) {
         this.connected.set(false);
-        this.error.set('Volvé a conectar la evaluación en Ajustes.');
+        this.error.set('Volvé a conectar la app en Ajustes.');
         return;
       }
       if (!response.ok) {
@@ -242,6 +280,7 @@ export class StudyPanel {
       token.value = '';
       this.connected.set(true);
       this.status.set('Evaluación conectada.');
+      await this.loadProviders();
     } catch { this.error.set('No se pudo conectar con la API.'); }
     finally { this.authBusy.set(false); }
   }
@@ -251,6 +290,7 @@ export class StudyPanel {
       const response = await fetch('/api/session', { method: 'DELETE', headers: { 'X-Habit-Request': '1' } });
       if (!response.ok) throw new Error('Could not disconnect');
       this.connected.set(false);
+      this.providers.set([]);
       this.status.set('Evaluación desconectada.');
     } catch { this.error.set('No se pudo desconectar. Volvé a intentar con conexión.'); }
   }
@@ -322,8 +362,38 @@ export class StudyPanel {
   private async checkConnection(): Promise<void> {
     try {
       const response = await fetch('/api/session', { cache: 'no-store' });
-      if (response.ok) this.connected.set((await response.json()).connected === true);
+      if (response.ok) {
+        this.connected.set((await response.json()).connected === true);
+        if (this.connected()) await this.loadProviders();
+      }
     } catch { /* Studying and self-assessment work offline. */ }
+  }
+
+  saveProvider(event: Event, id: string, model: string): void {
+    event.preventDefault();
+    this.error.set('');
+    if (!this.providers().some(provider => provider.id === id) ||
+        (model.trim() && !/^[a-zA-Z0-9][a-zA-Z0-9._:/+@~-]{0,149}$/.test(model.trim()))) {
+      this.error.set('Ingresá un identificador de modelo válido.');
+      return;
+    }
+    this.providerId.set(id);
+    this.model.set(model.trim());
+    try { localStorage.setItem(evaluationPreferences, JSON.stringify({ id, model: this.model() })); }
+    catch { this.error.set('La selección se aplica hasta que cierres la app.'); }
+    this.status.set('Proveedor actualizado.');
+  }
+
+  private async loadProviders(): Promise<void> {
+    const response = await fetch('/api/evaluation-providers', { cache: 'no-store' });
+    if (!response.ok) return;
+    const { providers, defaultProvider } = await response.json() as { providers: Provider[]; defaultProvider: string };
+    this.providers.set(providers);
+    let saved: { id?: string; model?: string } | null = null;
+    try { saved = JSON.parse(localStorage.getItem(evaluationPreferences) ?? 'null'); } catch { /* Optional browser preferences. */ }
+    const preferred = providers.find(provider => provider.id === saved?.id);
+    this.providerId.set(preferred?.id ?? providers.find(provider => provider.id === defaultProvider)?.id ?? providers[0]?.id ?? '');
+    this.model.set(preferred && typeof saved?.model === 'string' ? saved.model : '');
   }
 
   private async change(update: (current: Study) => void): Promise<void> {
