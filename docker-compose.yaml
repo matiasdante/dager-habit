@@ -1,0 +1,19 @@
+services:
+  app:
+    image: ${DCS_IMAGE:?Indicá el tag de la imagen compilada}
+    env_file: ${HABIT_ENV_FILE:?Indicá el archivo de credenciales del servidor}
+    environment:
+      HABIT_WEB_ROOT: /app/wwwroot
+      HABIT_QUOTA_PATH: /app/data/quota.log
+    ports:
+      - "127.0.0.1:${HABIT_HOST_PORT:?Indicá un puerto libre del host}:8080"
+    volumes:
+      - quota:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3; read -r status <&3; [[ $$status == *' 200 '* ]]"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+volumes:
+  quota:
