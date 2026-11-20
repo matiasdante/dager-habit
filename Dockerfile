@@ -13,7 +13,7 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api-build
 WORKDIR /source
 COPY Habit.Api.csproj ./
 RUN dotnet restore
-COPY Program.cs ./
+COPY Program.cs AiProviders.cs BookCatalog.cs NotebookAccess.cs ./
 RUN dotnet publish -c Release --no-restore -o /release /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
