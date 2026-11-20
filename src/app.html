@@ -1,15 +1,21 @@
-<a class="skip-link" href="#library-title">Ir a la colección</a>
+<a class="skip-link" [href]="view() === 'library' ? '#library-title' : '#' + view() + '-heading'">{{ view() === 'library' ? 'Ir a la colección' : 'Ir al contenido' }}</a>
 <header class="site-header">
   <div class="frame header-inner">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Dager Habit</span></div>
-    <a class="header-action" href="#book-title" (click)="$event.preventDefault(); title.focus()"><span aria-hidden="true">+</span> Agregar libro</a>
+    <nav class="main-nav" aria-label="Navegación principal">
+      <button type="button" [attr.aria-current]="view() === 'library' ? 'page' : null" (click)="navigate('library')">Biblioteca</button>
+      <button type="button" [attr.aria-current]="view() === 'today' ? 'page' : null" (click)="navigate('today')">Hoy</button>
+      <button type="button" [attr.aria-current]="view() === 'study' ? 'page' : null" (click)="navigate('study')">Estudiar</button>
+      <button type="button" [attr.aria-current]="view() === 'settings' ? 'page' : null" (click)="navigate('settings')">Ajustes</button>
+    </nav>
+    <a class="header-action" [hidden]="view() !== 'library'" href="#book-title" (click)="$event.preventDefault(); title.focus()"><span aria-hidden="true">+</span> Agregar libro</a>
   </div>
 </header>
 
-<main class="frame">
+<main class="frame" [hidden]="view() !== 'library'">
   <section class="hero" aria-labelledby="page-title">
     <div class="hero-copy">
-      <h1 id="page-title">Biblioteca</h1>
+      <h1 id="page-title" tabindex="-1">Biblioteca</h1>
       <p>Guardá los libros que querés estudiar.</p>
     </div>
     <div class="hero-image" aria-hidden="true"></div>
@@ -60,3 +66,13 @@
     </section>
   </div>
 </main>
+
+@if (database(); as storage) {
+  @let currentView = view();
+  <main class="frame" [hidden]="currentView === 'library'">
+    <app-study [database]="storage" [books]="sortedBooks()" [view]="currentView === 'library' ? 'today' : currentView"
+      (booksRestored)="replaceBooks($event)" (openStudy)="navigate('study')" />
+  </main>
+} @else if (view() !== 'library') {
+  <main class="frame"><p role="status">{{ error() || 'Cargando biblioteca…' }}</p></main>
+}

@@ -1,0 +1,212 @@
+<div class="study-page">
+  <p role="status" class="status">{{ status() }}</p>
+  <p role="alert" class="error">{{ error() }}</p>
+  @if (!loaded()) {
+    <p>Cargando progreso…</p>
+  } @else {
+    @switch (view()) {
+      @case ('today') {
+        <header class="study-heading">
+          <h1 id="today-heading" tabindex="-1">Hoy</h1>
+          <button class="primary-action" type="button" (click)="openStudy.emit()">{{ draft() ? 'Continuar sesión' : 'Empezar sesión' }}</button>
+        </header>
+        <dl class="progress-data">
+          <div><dt>Nivel</dt><dd>{{ stats().level }}</dd></div>
+          <div><dt>Experiencia</dt><dd>{{ stats().xp }} XP</dd></div>
+          <div><dt>Racha</dt><dd>{{ stats().streak }} días</dd></div>
+          <div><dt>Comodín semanal</dt><dd>{{ stats().wildcard ? 'Disponible' : 'Usado' }}</dd></div>
+        </dl>
+        <section class="study-card">
+          <h2>Repasos pendientes</h2>
+          @for (item of due(); track item.key) {
+            <article class="review-row">
+              <p class="storage-note">{{ title(item.session.bookId) }} · {{ item.session.section }} · {{ item.due }}</p>
+              <h3>{{ item.question }}</h3>
+              @if (reviewing() === item.key) {
+                <form class="study-form" (submit)="answer($event, item.session, item.index, reviewAnswer.value)">
+                  <label for="review-answer">Tu respuesta</label>
+                  <textarea #reviewAnswer id="review-answer" rows="4" maxlength="4000" required></textarea>
+                  <div class="study-actions">
+                    <button class="primary-action" value="remembered" [disabled]="saving()">Recordé</button>
+                    <button class="secondary-action" value="retry" [disabled]="saving()">Me costó</button>
+                  </div>
+                </form>
+              } @else {
+                <button class="secondary-action" type="button" (click)="reviewing.set(item.key)">Responder</button>
+              }
+            </article>
+          } @empty { <p>No tenés repasos pendientes para hoy.</p> }
+        </section>
+        @if (study().attempts.length) {
+          <details class="study-card">
+            <summary>Historial de repasos</summary>
+            @for (attempt of lastAttempts(); track attempt.id) {
+              @if (sessionFor(attempt); as session) {
+                <article class="review-row">
+                  <p class="storage-note">{{ attempt.day }} · {{ title(session.bookId) }}</p>
+                  <h3>{{ session.exam[attempt.question] }}</h3>
+                  <p class="written-text">{{ attempt.answer }}</p>
+                  <details><summary>Ver referencia de la sesión</summary>
+                    <p class="written-text">{{ session.recall }}</p>
+                    @if (session.notes) { <p class="written-text">{{ session.notes }}</p> }
+                  </details>
+                  @if (attempt.feedback; as feedback) {
+                    <ng-container [ngTemplateOutlet]="feedbackView" [ngTemplateOutletContext]="{ $implicit: feedback }"></ng-container>
+                  } @else {
+                    <button class="secondary-action" type="button" [disabled]="!!evaluating() || !connected()" (click)="evaluate('review', session, attempt)">
+                      {{ evaluating() === attempt.id ? 'Evaluando…' : 'Evaluar repaso' }}
+                    </button>
+                  }
+                </article>
+              }
+            }
+          </details>
+        }
+        <button class="secondary-action" type="button" (click)="shareToday()">Compartir resumen</button>
+      }
+      @case ('study') {
+        <header class="study-heading"><h1 id="study-heading" tabindex="-1">Sesión de estudio</h1></header>
+        @if (draft(); as session) {
+          <section class="study-card focus-card" aria-labelledby="step-heading">
+            <p class="storage-note">{{ title(session.bookId) }} · {{ session.section }}</p>
+            @if (pendingWrites()) { <p class="storage-note">Guardando borrador…</p> }
+            @switch (session.step) {
+              @case ('scan') {
+                <h2 id="step-heading">Antes de leer</h2>
+                <form class="study-form" (submit)="advance($event, session, { questions: scanQuestions.value })">
+                  <label for="question-kind">Tipo de pregunta</label>
+                  <select id="question-kind" [value]="session.questionKind" (change)="saveDraft(session, { questionKind: $any($event.target).value })">
+                    <option>concepto</option><option>método</option><option>crítica</option>
+                  </select>
+                  <label for="scan-questions">¿Qué querés entender?</label>
+                  <textarea #scanQuestions id="scan-questions" rows="4" required maxlength="3000" [defaultValue]="session.questions" (input)="saveDraft(session, { questions: scanQuestions.value })"></textarea>
+                  <button class="primary-action" [disabled]="saving()">Pasar a la lectura</button>
+                </form>
+              }
+              @case ('read') {
+                <h2 id="step-heading">Lectura enfocada</h2>
+                <p class="timer" [attr.aria-label]="session.deadline ? 'Tiempo restante' : 'Duración elegida'">{{ session.deadline ? remaining() : session.minutes + ':00' }}</p>
+                @if (!session.deadline) { <button class="secondary-action" type="button" (click)="startTimer(session)">Iniciar temporizador</button> }
+                @if (session.deadline && remaining() === '00:00') { <p role="status">Terminó el tiempo de lectura.</p> }
+                <form class="study-form" (submit)="advance($event, session, { notes: notes.value })">
+                  <label for="reading-notes">Apuntes opcionales</label>
+                  <textarea #notes id="reading-notes" rows="4" maxlength="5000" [defaultValue]="session.notes" (input)="saveDraft(session, { notes: notes.value })"></textarea>
+                  <button class="primary-action" [disabled]="saving()">Marcar lectura hecha</button>
+                </form>
+              }
+              @case ('recall') {
+                <h2 id="step-heading">Volcado de memoria</h2>
+                <p>Cerrá el material y explicá con tus palabras lo que recordás.</p>
+                <form class="study-form" (submit)="advance($event, session, { recall: recall.value, gaps: gaps.value })">
+                  <label for="recall-text">Lo que recordás</label>
+                  <textarea #recall id="recall-text" rows="6" required maxlength="4000" [defaultValue]="session.recall" (input)="saveDraft(session, { recall: recall.value })"></textarea>
+                  <label for="gaps">Lagunas para revisar</label>
+                  <textarea #gaps id="gaps" rows="2" maxlength="1500" [defaultValue]="session.gaps" (input)="saveDraft(session, { gaps: gaps.value })"></textarea>
+                  <button class="primary-action" [disabled]="saving()">Guardar volcado</button>
+                </form>
+              }
+              @case ('exam') {
+                <h2 id="step-heading">Examen futuro</h2>
+                <p>Escribí de 2 a 4 preguntas abiertas para responder en otro momento.</p>
+                <form #examForm class="study-form" (submit)="advance($event, session, { exam: updateExam(examForm) })">
+                  @for (question of session.exam; track $index) {
+                    <label [attr.for]="'exam-' + $index">Pregunta {{ $index + 1 }}</label>
+                    <textarea [id]="'exam-' + $index" rows="2" maxlength="600" [required]="$index < 2" [defaultValue]="question" (input)="saveDraft(session, { exam: updateExam(examForm) })"></textarea>
+                  }
+                  <div class="study-actions">
+                    @if (session.exam.length < 4) {
+                      <button class="secondary-action" type="button" (click)="saveDraft(session, { exam: [...updateExam(examForm), ''] })">Agregar pregunta</button>
+                    }
+                    <button class="primary-action" [disabled]="saving()">Cerrar sesión</button>
+                  </div>
+                </form>
+              }
+            }
+          </section>
+        } @else {
+          <section class="study-card focus-card">
+            <h2>Nueva sesión</h2>
+            @if (books().length) {
+              <form class="study-form" (submit)="start($event, selectedBook.value, section.value, duration.value)">
+                <label for="study-book">Libro</label>
+                <select #selectedBook id="study-book" required>
+                  @for (book of books(); track book.id) { <option [value]="book.id">{{ book.title }}</option> }
+                </select>
+                <label for="study-section">Sección</label>
+                <input #section id="study-section" required maxlength="160">
+                <label for="study-duration">Duración</label>
+                <select #duration id="study-duration"><option value="10">10 minutos</option><option value="15">15 minutos</option></select>
+                <button class="primary-action">Preparar lectura</button>
+              </form>
+            } @else { <p>Agregá un libro a la biblioteca para empezar.</p> }
+          </section>
+        }
+        @if (completed().length && draft()?.step !== 'read' && draft()?.step !== 'recall') {
+          <section class="study-card">
+            <h2>Sesiones completadas</h2>
+            <p class="storage-note">{{ connected() ? 'Al pedir una evaluación, enviás a Groq el título del libro y los textos necesarios para esa devolución.' : 'Conectá la evaluación en Ajustes si querés recibir devoluciones de Groq.' }}</p>
+            @for (session of completed(); track session.id) {
+              <details class="review-row">
+                <summary>{{ title(session.bookId) }} · {{ session.section }}</summary>
+                <p class="storage-note">Fecha de cierre · {{ session.closedOn }}</p>
+                <div class="study-actions">
+                  @if (!session.recallFeedback) { <button class="secondary-action" type="button" [disabled]="!!evaluating() || !connected()" (click)="evaluate('brain_dump', session)">{{ evaluating() === session.id + 'brain_dump' ? 'Evaluando…' : 'Evaluar volcado' }}</button> }
+                  @if (!session.examFeedback) { <button class="secondary-action" type="button" [disabled]="!!evaluating() || !connected()" (click)="evaluate('exam', session)">{{ evaluating() === session.id + 'exam' ? 'Evaluando…' : 'Evaluar examen' }}</button> }
+                </div>
+                @if (session.recallFeedback; as feedback) {
+                  <h3>Devolución del volcado</h3>
+                  <ng-container [ngTemplateOutlet]="feedbackView" [ngTemplateOutletContext]="{ $implicit: feedback }"></ng-container>
+                }
+                @if (session.examFeedback; as feedback) {
+                  <h3>Devolución del examen</h3>
+                  <ng-container [ngTemplateOutlet]="feedbackView" [ngTemplateOutletContext]="{ $implicit: feedback }"></ng-container>
+                }
+              </details>
+            }
+          </section>
+        }
+      }
+      @case ('settings') {
+        <header class="study-heading"><h1 id="settings-heading" tabindex="-1">Ajustes</h1></header>
+        <section class="study-card settings-card">
+          <h2>Evaluación con Groq</h2>
+          <p>Cuando pedís una evaluación, la app envía el título y el texto que se evalúa a Groq. Para un repaso también envía la referencia de tu sesión.</p>
+          @if (connected()) {
+            <button class="secondary-action" type="button" (click)="disconnect()">Desconectar evaluación</button>
+          } @else {
+            <form class="study-form" (submit)="connect($event, token)">
+              <label for="app-token">Token de la app</label>
+              <input #token id="app-token" type="password" autocomplete="off" required minlength="32" maxlength="256">
+              <button class="primary-action" [disabled]="authBusy()">Conectar evaluación</button>
+            </form>
+          }
+        </section>
+        <section class="study-card settings-card">
+          <h2>Respaldo</h2>
+          <p>Descargá tus libros y tu progreso en un archivo JSON.</p>
+          <div class="study-actions">
+            <button class="secondary-action" type="button" (click)="exportData()">Exportar respaldo</button>
+            <label class="secondary-action file-action">Elegir respaldo<input type="file" accept=".json,application/json" (change)="selectFile($any($event.target))"></label>
+          </div>
+          @if (restoreFile(); as file) {
+            <div class="restore-confirm">
+              <p><strong>{{ file.name }}</strong> reemplazará la biblioteca y el progreso de este dispositivo.</p>
+              <div class="study-actions">
+                <button class="primary-action" type="button" [disabled]="saving() || !!evaluating()" (click)="restore()">Confirmar restauración</button>
+                <button class="secondary-action" type="button" (click)="restoreFile.set(null)">Cancelar</button>
+              </div>
+            </div>
+          }
+        </section>
+      }
+    }
+  }
+</div>
+<ng-template #feedbackView let-feedback>
+  <div class="feedback">
+    @if (feedback.scores) { <p><strong>{{ feedbackXp(feedback) }}/9 · +{{ feedbackXp(feedback) }} XP</strong></p> }
+    <p>{{ feedback.comment }}</p>
+    <p>{{ feedback.action }}</p>
+    @if (feedback.possibleError) { <p>Posible error para verificar · {{ feedback.possibleError }}</p> }
+  </div>
+</ng-template>

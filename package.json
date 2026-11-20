@@ -2,9 +2,11 @@
   "name": "habit-web",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "start": "ng serve",
-    "build": "ng build"
+    "build": "ng build",
+    "test": "node --test tests/study.test.mjs"
   },
   "dependencies": {
     "@angular/common": "^22.0.0",
