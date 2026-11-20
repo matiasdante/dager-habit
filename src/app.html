@@ -1,0 +1,62 @@
+<a class="skip-link" href="#library-title">Ir a la colección</a>
+<header class="site-header">
+  <div class="frame header-inner">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>Dager Habit</span></div>
+    <a class="header-action" href="#book-title" (click)="$event.preventDefault(); title.focus()"><span aria-hidden="true">+</span> Agregar libro</a>
+  </div>
+</header>
+
+<main class="frame">
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <h1 id="page-title">Biblioteca</h1>
+      <p>Guardá los libros que querés estudiar.</p>
+    </div>
+    <div class="hero-image" aria-hidden="true"></div>
+  </section>
+
+  <div class="workspace">
+    <aside class="entry" aria-labelledby="new-book">
+      <h2 id="new-book">Nuevo libro</h2>
+      <form (submit)="addBook($event, title, author)">
+        <div class="field">
+          <label for="book-title">Título</label>
+          <input id="book-title" name="title" #title required maxlength="150" [readOnly]="saving()" (input)="title.setCustomValidity('')">
+        </div>
+        <div class="field">
+          <label for="book-author">Autor</label>
+          <input id="book-author" name="author" #author required maxlength="100" [readOnly]="saving()" (input)="author.setCustomValidity('')">
+        </div>
+        <button class="primary-action" type="submit" [disabled]="!ready() || saving()">
+          <span aria-hidden="true">+</span> {{ saving() ? 'Guardando…' : 'Agregar a la biblioteca' }}
+        </button>
+      </form>
+      <p class="storage-note">Los libros se guardan en este dispositivo.</p>
+      <p class="status" role="status" [class.has-message]="status()">{{ status() }}</p>
+      <p class="error" role="alert" [class.has-message]="error()">{{ error() }}</p>
+    </aside>
+
+    <section class="collection" aria-labelledby="library-title">
+      <div class="collection-heading">
+        <h2 id="library-title" tabindex="-1">Colección</h2>
+        @if (ready()) {
+          <span class="book-count">{{ sortedBooks().length }} {{ sortedBooks().length === 1 ? 'libro' : 'libros' }}</span>
+        }
+      </div>
+      @if (loading()) {
+        <p role="status" class="collection-message">Cargando biblioteca…</p>
+      } @else if (sortedBooks().length) {
+        <ul class="book-list">
+          @for (book of sortedBooks(); track book.id; let index = $index) {
+            <li class="book-row">
+              <span class="book-cover" aria-hidden="true" [attr.data-tone]="index % 4"></span>
+              <div class="book-details"><h3>{{ book.title }}</h3><p>{{ book.author }}</p></div>
+            </li>
+          }
+        </ul>
+      } @else if (ready()) {
+        <p class="collection-message">Todavía no agregaste libros.</p>
+      }
+    </section>
+  </div>
+</main>

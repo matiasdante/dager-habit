@@ -1,0 +1,280 @@
+@import '@fontsource-variable/dm-sans/wght.css';
+@import '@fontsource-variable/fraunces/wght.css';
+
+:root {
+  color-scheme: light;
+  --canvas: #f7f5ef;
+  --surface: #fffcf5;
+  --ink: #202c25;
+  --muted: #535e53;
+  --forest: #19382c;
+  --forest-deep: #11271f;
+  --cream: #fff3db;
+  --ochre: #f1bd83;
+  --ochre-ink: #855020;
+  --rule: #ded9ca;
+  --field-border: #8d8d7b;
+  --danger: #a0342a;
+  --display-font: 'Fraunces Variable', Georgia, serif;
+  --body-font: 'DM Sans Variable', system-ui, sans-serif;
+  font-family: var(--body-font);
+  color: var(--ink);
+  background: var(--canvas);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; }
+button, input { font: inherit; }
+a { color: inherit; }
+h1, h2, h3, p { margin: 0; }
+
+:focus-visible {
+  outline: 3px solid var(--ochre-ink);
+  outline-offset: 4px;
+}
+
+.frame {
+  width: min(72rem, calc(100% - 2 * clamp(1rem, 5vw, 3.5rem)));
+  margin-inline: auto;
+}
+
+.skip-link {
+  position: fixed;
+  z-index: 2;
+  inset-block-start: .5rem;
+  inset-inline-start: 1rem;
+  padding: .8rem 1rem;
+  background: var(--surface);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus { transform: none; }
+
+.site-header { border-bottom: 1px solid var(--rule); }
+
+.header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .85rem;
+  min-height: 4.5rem;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  font-size: 1.1rem;
+  font-weight: 750;
+  letter-spacing: -.035em;
+}
+
+.brand-mark {
+  position: relative;
+  width: 2rem;
+  height: 2rem;
+  flex: none;
+  border-radius: .45rem;
+  background: var(--forest);
+}
+
+.brand-mark::before,
+.brand-mark::after {
+  position: absolute;
+  inset-block-start: .53rem;
+  width: .48rem;
+  height: .88rem;
+  border: 1px solid var(--ochre);
+  border-radius: .16rem .06rem .08rem .08rem;
+  content: '';
+}
+
+.brand-mark::before { inset-inline-start: .47rem; transform: skewY(12deg); }
+.brand-mark::after { inset-inline-end: .47rem; transform: skewY(-12deg); }
+
+.header-action, .primary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .55rem;
+  min-height: 2.75rem;
+  border-radius: .4rem;
+  padding: .55rem .85rem;
+  font-size: .875rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-decoration: none;
+  touch-action: manipulation;
+}
+
+.header-action { border: 1px solid var(--field-border); }
+.header-action:hover { background: #ebe7da; }
+.header-action span, .primary-action span { font-size: 1.2rem; line-height: 1; }
+
+main { padding-block: clamp(1.25rem, 4vw, 2.6rem) 4rem; }
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.03fr 1fr;
+  min-height: 17rem;
+  overflow: hidden;
+  border-radius: .75rem;
+  color: var(--cream);
+  background: var(--forest-deep);
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(1.5rem, 6vw, 4.5rem);
+}
+
+.hero h1 {
+  font: 550 clamp(2.55rem, 6.6vw, 6.15rem) / .98 var(--display-font);
+  letter-spacing: -.05em;
+}
+
+.hero p {
+  margin-top: 1rem;
+  color: #e3d9c3;
+  font-size: clamp(.95rem, 1.7vw, 1.12rem);
+  line-height: 1.5;
+}
+
+.hero-image {
+  margin-inline-start: -4rem;
+  background:
+    linear-gradient(90deg, var(--forest-deep), transparent 32%),
+    url('/reading-desk.jpg') center 57% / cover;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 21rem);
+  grid-template-areas: 'collection entry';
+  align-items: start;
+  gap: clamp(1.25rem, 4vw, 3.5rem);
+  margin-top: clamp(1.5rem, 4vw, 2.75rem);
+}
+
+.collection { grid-area: collection; min-width: 0; }
+
+.collection-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-block: .2rem .8rem;
+}
+
+.collection-heading h2, .entry h2 {
+  font: 540 clamp(1.65rem, 3.3vw, 2.45rem) / 1.14 var(--display-font);
+  letter-spacing: -.035em;
+}
+
+.book-count { color: var(--muted); font-size: .9rem; flex: none; }
+.book-list { list-style: none; margin: 0; padding: 0; border-bottom: 1px solid var(--rule); }
+
+.book-row {
+  display: grid;
+  grid-template-columns: 2.4rem minmax(0, 1fr);
+  align-items: center;
+  gap: .95rem;
+  min-height: 4.7rem;
+  padding: .65rem .15rem;
+  border-top: 1px solid var(--rule);
+}
+
+.book-cover {
+  position: relative;
+  width: 2.25rem;
+  height: 3rem;
+  border-radius: .15rem .28rem .28rem .15rem;
+  background: linear-gradient(90deg, #0003 .26rem, transparent .28rem), var(--cover-color, #345848);
+  box-shadow: inset 0 -3px #f5e2bf80;
+}
+
+.book-cover::after {
+  position: absolute;
+  inset: .78rem .38rem auto .67rem;
+  height: .38rem;
+  border-block: 1px solid #fff2d784;
+  content: '';
+}
+
+.book-cover[data-tone='1'] { --cover-color: #93613e; }
+.book-cover[data-tone='2'] { --cover-color: #56644a; }
+.book-cover[data-tone='3'] { --cover-color: #6b555f; }
+
+.book-details { overflow-wrap: anywhere; }
+.book-details h3 { font-size: 1rem; line-height: 1.3; font-weight: 740; }
+.book-details p, .collection-message { margin-top: .23rem; color: var(--muted); font-size: .9rem; line-height: 1.45; }
+
+.entry {
+  grid-area: entry;
+  padding: clamp(1.15rem, 3vw, 1.7rem);
+  border: 1px solid var(--rule);
+  border-radius: .7rem;
+  background: var(--surface);
+}
+
+.entry h2 { font-size: 1.6rem; scroll-margin-top: 1rem; }
+.entry form { display: grid; gap: .85rem; margin-top: 1.15rem; }
+.field { display: grid; gap: .4rem; }
+.field label { font-size: .875rem; font-weight: 700; }
+
+.field input {
+  width: 100%;
+  min-height: 2.75rem;
+  padding: .58rem .7rem;
+  border: 1px solid var(--field-border);
+  border-radius: .36rem;
+  color: var(--ink);
+  background: #fff;
+  font-size: 1rem;
+}
+
+.primary-action {
+  margin-top: .2rem;
+  border: 1px solid transparent;
+  background: var(--forest);
+  color: #fff;
+  cursor: pointer;
+}
+
+.primary-action:hover:not(:disabled) { background: var(--forest-deep); }
+.primary-action:disabled { background: #666d62; cursor: default; }
+
+.storage-note, .status, .error {
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.storage-note, .has-message { margin-top: .8rem; }
+.status { color: var(--forest); font-weight: 650; }
+.error { color: var(--danger); font-weight: 650; }
+
+@media (max-width: 43rem) {
+  .header-inner { min-height: 3.85rem; }
+  .hero { min-height: 12rem; grid-template-columns: minmax(0, 1fr); position: relative; isolation: isolate; }
+  .hero-copy { padding: 1.35rem; }
+  .hero-image {
+    position: absolute;
+    inset: 0;
+    margin: 0;
+    background:
+      linear-gradient(90deg, var(--forest-deep) 8%, #11271fce 48%, #11271f45 100%),
+      url('/reading-desk.jpg') 65% 54% / cover;
+  }
+  .workspace { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'entry' 'collection'; }
+}
+
+@media (max-width: 22rem) {
+  .brand { gap: .4rem; font-size: .97rem; }
+  .header-action { gap: .25rem; padding-inline: .53rem; }
+}
