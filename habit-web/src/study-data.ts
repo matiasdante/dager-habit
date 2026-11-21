@@ -254,6 +254,42 @@ export function progress(study: Study, today: string) {
   return { xp, level: Math.floor(xp / 100) + 1, streak, wildcard: usedWeek !== currentWeek };
 }
 
+// Identifica los ejemplos de las versiones 1 y 2 para quitar solo las copias intactas.
+const legacySampleBooks = [
+  ['atomic-habits', 'Hábitos atómicos', 'James Clear'],
+  ['12-rules', '12 reglas para vivir', 'Jordan Peterson'],
+  ['college-success', 'College Success', 'Universidad de Massachusetts'],
+  ['unfair-advantage', 'The Unfair Advantage', 'Ash Ali y Hasan Kubba'],
+  ['mindset', 'Mindset', 'Carol Dweck'],
+  ['friends', 'Cómo ganar amigos e influir sobre las personas', 'Dale Carnegie'],
+  ['deep-work', 'Deep Work', 'Cal Newport'],
+  ['digital-minimalism', 'Minimalismo digital', 'Cal Newport'],
+  ['fooled', 'Fooled by Randomness', 'Nassim Nicholas Taleb'],
+  ['thinking', 'Thinking, Fast and Slow', 'Daniel Kahneman'],
+] as const;
+
+export function upgradeLibrary(database: IDBDatabase, transaction: IDBTransaction, oldVersion: number): void {
+  if (oldVersion === 0) database.createObjectStore('books', { keyPath: 'id' });
+  if (oldVersion < 2) database.createObjectStore('study');
+  if (oldVersion === 0 || oldVersion >= 3) return;
+
+  const books = transaction.objectStore('books');
+  const request = transaction.objectStore('study').get('current');
+  request.onsuccess = () => {
+    const study = request.result as Study | undefined;
+    if (study && !Array.isArray(study.sessions)) return;
+    const studiedBooks = new Set(study?.sessions.map(session => session.bookId));
+    for (const [id, title, author] of legacySampleBooks) {
+      if (studiedBooks.has(id)) continue;
+      const read = books.get(id);
+      read.onsuccess = () => {
+        const book = read.result as Book | undefined;
+        if (book?.title === title && book.author === author && Object.keys(book).length === 3) books.delete(id);
+      };
+    }
+  };
+}
+
 export function readStudy(database: IDBDatabase): Promise<Study> {
   return new Promise((resolve, reject) => {
     const request = database.transaction('study').objectStore('study').get('current');

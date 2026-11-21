@@ -153,14 +153,59 @@ async function downloadBackup(page, name = 'Exportar respaldo') {
   return readFile(await (await download).path());
 }
 
+async function addManualBook(page, { title, author }) {
+  await page.getByText('Agregar manualmente', { exact: true }).click();
+  await page.getByLabel('Título', { exact: true }).fill(title);
+  await page.getByLabel('Autor', { exact: true }).fill(author);
+  await button(page, 'Agregar a la biblioteca').click();
+  await visible(page.locator('.book-list').getByRole('heading', { name: title, exact: true }));
+}
+
+test('quita solo los libros de ejemplo intactos al actualizar una biblioteca anterior', { timeout: 25_000 }, async t => {
+  const example = { id: 'atomic-habits', title: 'Hábitos atómicos', author: 'James Clear' };
+  const edited = { id: 'deep-work', title: 'Deep Work (mi edición)', author: 'Cal Newport' };
+  const reading = { id: 'mindset', title: 'Mindset', author: 'Carol Dweck', totalPages: 200, page: 32 };
+  const visited = { id: 'fooled', title: 'Fooled by Randomness', author: 'Nassim Nicholas Taleb', openedAt: 1 };
+  const studied = { id: 'digital-minimalism', title: 'Minimalismo digital', author: 'Cal Newport' };
+  const added = { ...example, id: 'manually-added' };
+  const unstudied = [edited, reading, visited, added];
+  for (const version of [1, 2]) {
+    const context = await createContext(t, { serviceWorkers: 'block' });
+    const page = await newPage(context);
+    const books = version === 1 ? unstudied : [...unstudied, studied];
+    const study = {
+      sessions: version === 1 ? [] : [{ ...session, bookId: studied.id }],
+      attempts: version === 1 ? [] : [{
+        id: 'legacy-attempt', sessionId: session.id, question: 0, day: '2026-11-17', answer: 'Respuesta anterior.',
+        remembered: true,
+      }],
+    };
+    await page.route(baseUrl + '/legacy-library', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html>' }));
+    await page.goto(baseUrl + '/legacy-library');
+    await page.evaluate(({ version, books, study }) => new Promise((resolve, reject) => {
+      const request = indexedDB.open('dager-habit', version);
+      request.onupgradeneeded = () => {
+        const store = request.result.createObjectStore('books', { keyPath: 'id' });
+        for (const book of books) store.add(book);
+        if (version === 2) request.result.createObjectStore('study').put(study, 'current');
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { request.result.close(); resolve(); };
+    }), { version, books: [example, ...books], study });
+
+    await go(page, '/ajustes');
+    const backup = JSON.parse(await downloadBackup(page));
+    assert.deepEqual(new Map(backup.books.map(book => [book.id, book])), new Map(books.map(book => [book.id, book])));
+    assert.deepEqual(backup.study, study);
+  }
+});
+
 test('busca localmente sin tildes y permite actualizar, editar y archivar un libro', { timeout: 30_000 }, async t => {
   const context = await createContext(t, { serviceWorkers: 'block', viewport: { width: 390, height: 844 } });
   const page = await newPage(context);
   await go(page);
-  await page.getByText('Agregar manualmente', { exact: true }).click();
-  await page.getByLabel('Título', { exact: true }).fill(book.title);
-  await page.getByLabel('Autor', { exact: true }).fill(book.author);
-  await button(page, 'Agregar a la biblioteca').click();
+  await visible(page.getByText('No hay libros activos en tu colección.'));
+  await addManualBook(page, book);
   const query = page.getByRole('searchbox');
   await query.fill('alge per');
   await visible(page.locator('.local-results').getByRole('link', { name: /Álgebra práctica/ }));
@@ -213,7 +258,7 @@ test('estudia y responde offline, conserva borradores y evita duplicados entre p
   const context = await createContext(t);
   const page = await newPage(context, '2026-11-21T16:00:00Z');
   await go(page);
-  await visible(heading(page, 'Colección'));
+  await addManualBook(page, { title: 'Hábitos atómicos', author: 'James Clear' });
   await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
   await page.waitForFunction(() => !!navigator.serviceWorker.controller);
   assert.equal(await page.evaluate(() => fetch('/index.html').then(response => response.ok)), true);
@@ -299,11 +344,14 @@ test('restaura respaldos de más de 10 MB en otro perfil y conserva los datos an
   const backup = await downloadBackup(page);
   assert.ok(backup.byteLength > 10 * 1024 * 1024);
   const other = await newPage(await createContext(t, { serviceWorkers: 'block' }));
+  await go(other);
+  await addManualBook(other, { title: 'Cuaderno de prueba', author: 'Autora de prueba' });
   await go(other, '/ajustes');
   await selectBackup(other, backup);
   await visible(heading(other, 'Confirmá la restauración'));
   await visible(other.getByText('2200', { exact: true }));
-  assert.ok(JSON.parse(await downloadBackup(other, 'Descargar copia actual')).books.length > 1);
+  const previous = JSON.parse(await downloadBackup(other, 'Descargar copia actual'));
+  assert.deepEqual(previous.books.map(book => book.title), ['Cuaderno de prueba']);
   await button(other, 'Confirmar restauración').click();
   await visible(other.getByText('Respaldo restaurado.'));
   await selectBackup(other, { ...fixtureBackup, books: [] });

@@ -1,23 +1,13 @@
 import { Component, DestroyRef, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { stagger } from 'animejs/utils';
 import { waapi } from 'animejs/waapi';
-import { Book, BookSection, coverUrl, editBook, languageName, libraryMatches, nextReadingSection, readingPercent, updateReadingPage } from './study-data';
+import {
+  Book, BookSection, coverUrl, editBook, languageName, libraryMatches, nextReadingSection, readingPercent,
+  updateReadingPage, upgradeLibrary,
+} from './study-data';
 import { StudyTarget } from './book-detail';
 import { easeOut, enter, reducedMotion, slideIn } from './motion';
 import { StudyPanel } from './study';
-
-const initialBooks: Book[] = [
-  { id: 'atomic-habits', title: 'Hábitos atómicos', author: 'James Clear' },
-  { id: '12-rules', title: '12 reglas para vivir', author: 'Jordan Peterson' },
-  { id: 'college-success', title: 'College Success', author: 'Universidad de Massachusetts' },
-  { id: 'unfair-advantage', title: 'The Unfair Advantage', author: 'Ash Ali y Hasan Kubba' },
-  { id: 'mindset', title: 'Mindset', author: 'Carol Dweck' },
-  { id: 'friends', title: 'Cómo ganar amigos e influir sobre las personas', author: 'Dale Carnegie' },
-  { id: 'deep-work', title: 'Deep Work', author: 'Cal Newport' },
-  { id: 'digital-minimalism', title: 'Minimalismo digital', author: 'Cal Newport' },
-  { id: 'fooled', title: 'Fooled by Randomness', author: 'Nassim Nicholas Taleb' },
-  { id: 'thinking', title: 'Thinking, Fast and Slow', author: 'Daniel Kahneman' },
-];
 
 type View = 'library' | 'today' | 'study' | 'settings' | 'book' | 'notebook' | 'about';
 type CatalogMatch = Pick<Book, 'title' | 'author' | 'coverId'> & { workId: string; editionId?: string };
@@ -188,14 +178,8 @@ export class App {
       return;
     }
 
-    const request = indexedDB.open('dager-habit', 2);
-    request.onupgradeneeded = event => {
-      if (event.oldVersion === 0) {
-        const store = request.result.createObjectStore('books', { keyPath: 'id' });
-        for (const book of initialBooks) store.add(book);
-      }
-      request.result.createObjectStore('study');
-    };
+    const request = indexedDB.open('dager-habit', 3);
+    request.onupgradeneeded = event => upgradeLibrary(request.result, request.transaction!, event.oldVersion);
     request.onblocked = () => this.showStorageError('Cerrá las otras pestañas de The Dager Habit para abrir la biblioteca.');
     request.onerror = () => this.showStorageError('No se pudo abrir la biblioteca. Revisá el almacenamiento del navegador.');
     request.onsuccess = () => {
