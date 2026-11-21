@@ -1,8 +1,8 @@
-# Dager Habit
+# The Dager Habit
 
 ## Identidad
 
-Dager Habit es una herramienta personal de estudio. La biblioteca toma la jerarquía de un catálogo editorial. Una fotografía presenta la pantalla, las filas muestran los títulos y el formulario aparece junto a la colección. El símbolo de libro abierto se usa en el encabezado y en el ícono de la PWA.
+The Dager Habit es una herramienta personal de estudio. La biblioteca toma la jerarquía de un catálogo editorial. Una fotografía presenta la pantalla, las filas muestran los títulos y el formulario aparece junto a la colección. El símbolo de libro abierto se usa en el encabezado y en el ícono de la PWA.
 
 | Rol | Color |
 | --- | --- |

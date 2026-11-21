@@ -1,4 +1,6 @@
-import { Component, DestroyRef, Injector, afterNextRender, computed, effect, inject, signal } from '@angular/core';
+import { Component, DestroyRef, ElementRef, Injector, afterNextRender, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { stagger } from 'animejs/utils';
+import { waapi } from 'animejs/waapi';
 import { Book, coverUrl, readingPercent } from './study-data';
 import { StudyTarget } from './book-detail';
 import { StudyPanel } from './study';
@@ -16,10 +18,14 @@ const initialBooks: Book[] = [
   { id: 'thinking', title: 'Thinking, Fast and Slow', author: 'Daniel Kahneman' },
 ];
 
-type View = 'library' | 'today' | 'study' | 'settings' | 'book' | 'notebook';
+type View = 'library' | 'today' | 'study' | 'settings' | 'book' | 'notebook' | 'about';
 type CatalogMatch = Pick<Book, 'title' | 'author' | 'coverId'> & { workId: string; editionId?: string };
-const routes = { library: '/', today: '/hoy', study: '/estudiar', settings: '/ajustes', notebook: '/notebook' };
-const viewTitles = { library: 'Biblioteca', today: 'Hoy', study: 'Sesión de estudio', settings: 'Ajustes', notebook: 'NotebookLM' };
+const routes = { library: '/', today: '/hoy', study: '/estudiar', settings: '/ajustes', notebook: '/notebook', about: '/acerca-de' };
+const viewTitles = {
+  library: 'Biblioteca', today: 'Hoy', study: 'Sesión de estudio', settings: 'Ajustes',
+  notebook: 'Resúmenes', about: 'Acerca de',
+};
+const easeOut = 'cubic-bezier(0.23, 1, 0.32, 1)';
 
 @Component({
   selector: 'app-root',
@@ -28,6 +34,13 @@ const viewTitles = { library: 'Biblioteca', today: 'Hoy', study: 'Sesión de est
 })
 export class App {
   private readonly injector = inject(Injector);
+  private readonly opening = viewChild.required<ElementRef<HTMLDivElement>>('opening');
+  private readonly libraryHeading = viewChild<ElementRef<HTMLDivElement>>('libraryHeading');
+  private readonly heroPhoto = viewChild<ElementRef<HTMLImageElement>>('heroPhoto');
+  private readonly catalogList = viewChild<ElementRef<HTMLUListElement>>('catalogList');
+  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  private catalogRequest?: AbortController;
+  readonly openingLines = [['The', 'Dager'], ['Habit']];
   private readonly books = signal<Book[]>([]);
   private readonly collator = new Intl.Collator('es-AR', { sensitivity: 'base', numeric: true });
   readonly database = signal<IDBDatabase | null>(null);
@@ -61,6 +74,9 @@ export class App {
   }
 
   private readRoute(focus = false): void {
+    const previousView = this.view();
+    const revisiting = history.state?.habitVisited === true;
+    if (!revisiting) history.replaceState({ ...history.state, habitVisited: true }, '');
     const [pathname, query] = location.hash.slice(1).split('?');
     const path = pathname || '/';
     const book = path.match(/^\/libros\/([^/]+)$/);
@@ -81,7 +97,8 @@ export class App {
     }
     if (focus) afterNextRender(() => {
       const main = document.getElementById('main-content');
-      (main?.querySelector<HTMLElement>('h1:not([hidden] *)') ?? main)?.focus();
+      (main?.querySelector<HTMLElement>('h1:not([hidden] *)') ?? main)?.focus({ preventScroll: revisiting });
+      if (!revisiting && previousView !== 'library') this.revealLibrary();
     }, { injector: this.injector });
   }
 
@@ -106,8 +123,9 @@ export class App {
       const title = view === 'book'
         ? this.books().find(book => book.id === this.bookId())?.title ?? 'Ficha del libro'
         : viewTitles[view];
-      document.title = title + ' · Dager Habit';
+      document.title = title + ' · The Dager Habit';
     });
+    afterNextRender(() => this.playOpening());
     const routeListener = () => this.readRoute(true);
     window.addEventListener('hashchange', routeListener);
     inject(DestroyRef).onDestroy(() => window.removeEventListener('hashchange', routeListener));
@@ -124,7 +142,7 @@ export class App {
       }
       request.result.createObjectStore('study');
     };
-    request.onblocked = () => this.showStorageError('Cerrá las otras pestañas de Dager Habit para abrir la biblioteca.');
+    request.onblocked = () => this.showStorageError('Cerrá las otras pestañas de The Dager Habit para abrir la biblioteca.');
     request.onerror = () => this.showStorageError('No se pudo abrir la biblioteca. Revisá el almacenamiento del navegador.');
     request.onsuccess = () => {
       const database = request.result;
@@ -143,6 +161,67 @@ export class App {
       };
       read.onerror = () => this.showStorageError('No se pudo leer la biblioteca. Recargá para volver a intentar.');
     };
+  }
+
+  private playOpening(): void {
+    if (this.view() !== 'library' || this.reducedMotion.matches) return;
+
+    const opening = this.opening().nativeElement;
+    const letters = opening.querySelectorAll<HTMLElement>('.opening-letter');
+    const listeners = new AbortController();
+    const finish = () => {
+      opening.hidden = true;
+      listeners.abort();
+    };
+
+    opening.hidden = false;
+    const reveal = waapi.animate(letters, {
+      transform: ['translateY(115%)', 'translateY(0)'],
+      delay: stagger(27, { ease: 'out(2)' }),
+      duration: 310,
+      ease: easeOut,
+    });
+    const exit = waapi.animate(opening, {
+      opacity: [1, 0],
+      delay: 690,
+      duration: 210,
+      ease: easeOut,
+      onComplete: () => {
+        finish();
+        this.revealLibrary();
+      },
+    });
+
+    const stop = () => {
+      finish();
+      reveal.cancel();
+      exit.cancel();
+    };
+    const options = { signal: listeners.signal, capture: true, passive: true };
+    window.addEventListener('keydown', stop, options);
+    window.addEventListener('pointerdown', stop, options);
+    window.addEventListener('focusin', stop, options);
+    window.addEventListener('wheel', stop, options);
+    this.reducedMotion.addEventListener('change', stop, options);
+  }
+
+  private revealLibrary(): void {
+    if (this.view() !== 'library' || this.reducedMotion.matches) return;
+    const heading = this.libraryHeading()?.nativeElement;
+    const photo = this.heroPhoto()?.nativeElement;
+    if (!heading || !photo) return;
+
+    waapi.animate(heading, {
+      opacity: [0.68, 1],
+      transform: ['translateY(14px)', 'translateY(0)'],
+      duration: 280,
+      ease: easeOut,
+    });
+    waapi.animate(photo, {
+      transform: ['scale(1.12)', 'scale(1)'],
+      duration: 420,
+      ease: easeOut,
+    });
   }
 
   addBook(event: Event, title: HTMLInputElement, author: HTMLInputElement): void {
@@ -179,19 +258,64 @@ export class App {
     this.catalogStatus.set('Buscando en Open Library…');
     this.catalog.set([]);
     this.searching.set(true);
+    const request = new AbortController();
+    this.catalogRequest = request;
     try {
-      const response = await fetch('/api/catalog?q=' + encodeURIComponent(query));
+      const response = await fetch('/api/catalog?q=' + encodeURIComponent(query), { signal: request.signal });
       if (!response.ok) throw new Error('Catalog unavailable');
       const matches = await response.json() as CatalogMatch[];
+      if (request.signal.aborted) return;
       this.catalog.set(matches);
-      this.catalogStatus.set(matches.length === 1 ? '1 resultado' : matches.length
-        ? matches.length + ' resultados'
-        : 'No encontramos coincidencias. Probá con otra búsqueda o agregá el libro manualmente.');
+      if (matches.length) {
+        const count = matches.length === 1 ? '1 resultado' : `${matches.length} resultados`;
+        this.catalogStatus.set(`${count} para «${query}».`);
+      } else {
+        this.catalogStatus.set('No encontramos coincidencias. Probá con otra búsqueda o agregá el libro manualmente.');
+      }
+      if (matches.length && !this.reducedMotion.matches) {
+        afterNextRender(() => this.revealCatalog(), { injector: this.injector });
+      }
     } catch {
+      if (request.signal.aborted) return;
       this.catalogStatus.set('');
       this.catalogError.set('No se pudo buscar en Open Library. Volvé a intentar o agregá el libro manualmente.');
+    } finally {
+      if (this.catalogRequest === request) {
+        this.catalogRequest = undefined;
+        this.searching.set(false);
+      }
     }
-    finally { this.searching.set(false); }
+  }
+
+  catalogInputChanged(input: HTMLInputElement): void {
+    input.setCustomValidity('');
+    if (!input.value) this.clearCatalogSearch(input);
+  }
+
+  clearCatalogSearch(input: HTMLInputElement): void {
+    this.catalogRequest?.abort();
+    this.catalogRequest = undefined;
+    this.searching.set(false);
+    this.catalog.set([]);
+    this.catalogStatus.set('');
+    this.catalogError.set('');
+    input.value = '';
+    input.setCustomValidity('');
+    input.focus();
+  }
+
+  private revealCatalog(): void {
+    const list = this.catalogList()?.nativeElement;
+    if (!list || this.reducedMotion.matches || this.view() !== 'library') return;
+
+    const rows = list.querySelectorAll<HTMLLIElement>(':scope > li:nth-child(-n+4)');
+    waapi.animate(rows, {
+      opacity: [0.62, 1],
+      transform: ['translateY(16px)', 'translateY(0)'],
+      delay: stagger(32, { ease: 'out(2)' }),
+      duration: 250,
+      ease: easeOut,
+    });
   }
 
   async importBook(match: CatalogMatch): Promise<void> {

@@ -35,7 +35,7 @@ export class StudyPanel {
   });
   readonly currentBook = computed(() => this.books().find(book => book.id === this.bookId()));
   readonly bookSessions = computed(() => this.study().sessions.filter(session => session.bookId === this.bookId()));
-  readonly completed = computed(() => this.study().sessions.filter(session => session.step === 'done').slice().reverse());
+  readonly completed = computed(() => this.study().sessions.filter(session => session.step === 'done').reverse());
   readonly stats = computed(() => progress(this.study(), this.today()));
   readonly reviewing = signal('');
   readonly status = signal('');
@@ -404,7 +404,7 @@ export class StudyPanel {
   async shareToday(): Promise<void> {
     const sessions = this.study().sessions.filter(session => session.closedOn === this.today()).length;
     const attempts = this.study().attempts.filter(attempt => attempt.day === this.today()).length;
-    const text = 'Dager Habit · Hoy completé ' + sessions + ' sesiones y ' + attempts + ' repasos.';
+    const text = 'The Dager Habit · Hoy completé ' + sessions + ' sesiones y ' + attempts + ' repasos.';
     try {
       if (navigator.share) await navigator.share({ text });
       else {

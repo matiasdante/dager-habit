@@ -83,7 +83,7 @@
           <button class="secondary-action" type="button" (click)="downloadReminder(reminder)">Descargar para el calendario</button>
           <button class="secondary-action" type="button" [disabled]="busy()" (click)="clearReminder(reminderAt)">Quitar recordatorio</button>
         </div>
-        <p class="storage-note">Importá el archivo en tu calendario para recibir el aviso con Dager Habit cerrado.</p>
+        <p class="storage-note">Importá el archivo en tu calendario para recibir el aviso con <span translate="no">The Dager Habit</span> cerrado.</p>
       }
       <form class="study-form" autocomplete="off" (submit)="saveReminder($event, reminderAt, reminderKind.value)">
         <label for="reminder-kind">Actividad</label>

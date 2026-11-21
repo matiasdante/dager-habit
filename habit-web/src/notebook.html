@@ -1,7 +1,7 @@
 <div class="study-page">
-  <header class="study-heading"><h1 id="notebook-heading" tabindex="-1">NotebookLM</h1></header>
+  <header class="study-heading"><h1 id="notebook-heading" tabindex="-1">Resúmenes</h1></header>
   <section class="study-card settings-card">
-    <h2>Resumen de lectura</h2>
+    <h2>Resumen por libro</h2>
     @if (books().length) {
       <div class="study-form">
         <label for="notebook-book">Libro</label>
@@ -29,7 +29,7 @@
   </section>
   <section class="study-card settings-card">
     <h2>Sincronización con Google Cloud</h2>
-    <p>Para enviar el resumen desde Dager Habit, necesitás una licencia de Gemini Notebook Enterprise y permiso de edición en el notebook.</p>
+    <p>Para enviar el resumen desde <span translate="no">The Dager Habit</span>, necesitás una licencia de Gemini Notebook Enterprise y permiso de edición en el notebook.</p>
     <p class="status" role="status">{{ checking() ? 'Comprobando el acceso…' : status() }}</p>
     @if (google(); as access) {
       @if (!access.configured) {
