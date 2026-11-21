@@ -55,7 +55,7 @@ Google se desvincula al cerrar la conexión o al vencer el token. Volvé a inici
 
 ## Entrega interna
 
-El runner debe tener los dos repositorios en carpetas contiguas. Desde `habit-api`, construí y exportá el runtime compilado:
+Desde `habit-api`, construí la imagen con la web de `../habit-web` y exportala:
 
 ```sh
 docker build --build-context web=../habit-web -t "$DCS_IMAGE" .

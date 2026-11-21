@@ -1,0 +1,35 @@
+name: Reportar un error
+description: Contanos qué pasó y cómo reproducirlo.
+body:
+  - type: markdown
+    attributes:
+      value: Usá datos de ejemplo. Quitá claves, tokens y datos personales de capturas y registros.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducirlo
+      description: Incluí la vista o acción que dispara el error.
+      placeholder: |
+        1. Abrí…
+        2. Elegí…
+        3. Ocurrió…
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Resultado esperado y resultado actual
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Versión, navegador y sistema operativo
+      placeholder: v0.1.0, Firefox, Ubuntu, app instalada
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Capturas o registros
+      description: Adjuntá solo material que puedas compartir públicamente.
