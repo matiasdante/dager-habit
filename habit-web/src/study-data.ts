@@ -3,12 +3,16 @@ export interface Book {
   title: string;
   author: string;
   catalogId?: string;
+  language?: string;
+  publicationYear?: number;
   summary?: string;
   coverId?: number;
   totalPages?: number;
   page?: number;
   sections?: BookSection[];
   reminder?: ReadingReminder;
+  archived?: boolean;
+  openedAt?: number;
 }
 
 export interface BookSection {
@@ -40,6 +44,7 @@ export interface Session {
   questions: string;
   questionKind: 'concepto' | 'método' | 'crítica';
   deadline: number | null;
+  pausedRemainingMs?: number;
   notes: string;
   recall: string;
   gaps: string;
@@ -63,15 +68,60 @@ export interface Attempt {
 export interface Study {
   sessions: Session[];
   attempts: Attempt[];
+  reviewDrafts?: ReviewDraft[];
+}
+
+interface ReviewDraft {
+  sessionId: string;
+  question: number;
+  answer: string;
 }
 
 export const emptyStudy = (): Study => ({ sessions: [], attempts: [] });
 
 export const maxPages = 100_000;
 
+export function updateReadingPage(book: Book, page: number, totalPages = book.totalPages): Book | null {
+  return integer(totalPages, 1, maxPages) && integer(page, 0, totalPages)
+    ? { ...book, page, totalPages }
+    : null;
+}
+
+export function nextReadingSection(book: Book): BookSection | undefined {
+  const total = book.totalPages;
+  if (!total) return undefined;
+  return book.sections?.filter(section => section.endPage && section.endPage > (book.page ?? 0) && section.endPage <= total)
+    .sort((a, b) => a.endPage! - b.endPage!)[0];
+}
+
+const searchWords = (value: string) => value.normalize('NFD').toLowerCase().replace(/\p{M}/gu, '').match(/[\p{L}\p{N}]+/gu) ?? [];
+
+export function libraryMatches(books: Book[], query: string): { book: Book; section?: BookSection }[] {
+  const terms = searchWords(query);
+  const hits: { book: Book; section?: BookSection }[] = [];
+  if (!terms.length) return hits;
+  for (const book of books) {
+    const words = searchWords(book.title + ' ' + book.author);
+    const matches = (text: string[]) => terms.every(term => text.some(word => word.startsWith(term)));
+    if (matches(words)) hits.push({ book });
+    for (const section of book.sections ?? []) {
+      const chapter = searchWords(section.title);
+      if (chapter.some(word => terms.some(term => word.startsWith(term))) && matches([...words, ...chapter]))
+        hits.push({ book, section });
+    }
+  }
+  return hits;
+}
+
 export function readingPercent(book: Book): number | null {
   if (!book.totalPages) return null;
   return Math.floor((book.page ?? 0) * 100 / book.totalPages);
+}
+
+const languages = new Intl.DisplayNames('es-AR', { type: 'language', fallback: 'none' });
+
+export function languageName(code: string): string {
+  return languages.of(code) ?? code;
 }
 
 export function coverUrl(coverId: number): string {
@@ -132,16 +182,42 @@ export function formatStudyDay(day: string): string {
 }
 
 export function reviewSchedule(session: Session, question: number, attempts: Attempt[]) {
-  let due = session.closedOn ? addDays(session.closedOn, 2) : null;
-  let stage = 0;
-  let latest: Attempt | undefined;
+  let schedule = initialReview(session);
   for (const attempt of attempts) {
     if (attempt.sessionId !== session.id || attempt.question !== question) continue;
-    latest = attempt;
-    if (attempt.remembered && !attempt.repeatByAi) stage++;
-    due = stage === 4 ? null : addDays(attempt.day, !attempt.remembered || attempt.repeatByAi ? 1 : [0, 3, 5, 7][stage]);
+    schedule = advanceReview(schedule, attempt);
   }
-  return { due, stage, latest };
+  return schedule;
+}
+
+function initialReview(session: Session): { due: string | null; stage: number; latest?: Attempt } {
+  return { due: session.closedOn ? addDays(session.closedOn, 2) : null, stage: 0 };
+}
+
+function advanceReview(schedule: ReturnType<typeof initialReview>, attempt: Attempt): ReturnType<typeof initialReview> {
+  if (schedule.stage === 4) return schedule;
+  const repeat = !attempt.remembered || attempt.repeatByAi;
+  const stage = schedule.stage + (repeat ? 0 : 1);
+  return { stage, due: stage === 4 ? null : addDays(attempt.day, repeat ? 1 : [0, 3, 5, 7][stage]), latest: attempt };
+}
+
+export function scheduledReviews(sessions: Session[], attempts: Attempt[]) {
+  const byQuestion = new Map<string, Attempt[]>();
+  for (const attempt of attempts) {
+    const key = JSON.stringify([attempt.sessionId, attempt.question]);
+    const previous = byQuestion.get(key);
+    if (previous) previous.push(attempt);
+    else byQuestion.set(key, [attempt]);
+  }
+  return sessions.flatMap(session => session.exam.flatMap((question, index) => {
+    const key = JSON.stringify([session.id, index]);
+    const { due } = reviewSchedule(session, index, byQuestion.get(key) ?? []);
+    return due ? [{ key, due, session, question, index }] : [];
+  })).sort((a, b) => a.due.localeCompare(b.due));
+}
+
+export function timerRemaining(session: Session, now: number): number {
+  return session.pausedRemainingMs ?? Math.max(0, (session.deadline ?? now) - now);
 }
 
 export function sessionXp(session: Session): number {
@@ -182,6 +258,14 @@ export function readStudy(database: IDBDatabase): Promise<Study> {
   return new Promise((resolve, reject) => {
     const request = database.transaction('study').objectStore('study').get('current');
     request.onsuccess = () => resolve(request.result ?? emptyStudy());
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export function readBooks(database: IDBDatabase): Promise<Book[]> {
+  return new Promise((resolve, reject) => {
+    const request = database.transaction('books').objectStore('books').getAll();
+    request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
@@ -271,6 +355,10 @@ function integer(value: unknown, min: number, max: number): value is number {
 function validBookMetadata(book: Record<string, unknown>): boolean {
   if ((book.catalogId !== undefined && !text(book.catalogId, 120, true)) ||
       (book.summary !== undefined && !text(book.summary, 700)) ||
+      (book.language !== undefined && (typeof book.language !== 'string' || !/^[a-z]{3}$/.test(book.language))) ||
+      (book.publicationYear !== undefined && !integer(book.publicationYear, 1, 9999)) ||
+      (book.archived !== undefined && typeof book.archived !== 'boolean') ||
+      (book.openedAt !== undefined && !integer(book.openedAt, 0, Number.MAX_SAFE_INTEGER)) ||
       (book.coverId !== undefined && !integer(book.coverId, 1, 2_147_483_647)) ||
       (book.totalPages !== undefined && !integer(book.totalPages, 1, maxPages)) ||
       (book.page !== undefined && (!integer(book.totalPages, 1, maxPages) || !integer(book.page, 0, book.totalPages)))) return false;
@@ -321,6 +409,8 @@ export function parseBackup(input: string): Backup | null {
         !text(session.questions, 3000, session.step !== 'scan') || !text(session.notes, 5000) ||
         !text(session.recall, 4000, ['exam', 'done'].includes(session.step)) || !text(session.gaps, 1500) ||
         (session.deadline !== null && (typeof session.deadline !== 'number' || !Number.isSafeInteger(session.deadline) || session.deadline < 0)) ||
+        (session.pausedRemainingMs !== undefined && (session.step !== 'read' || session.deadline !== null ||
+          !integer(session.pausedRemainingMs, 1, Number(session.minutes) * 60_000))) ||
         !Array.isArray(session.exam) || session.exam.length < 2 || session.exam.length > 4 ||
         !session.exam.every(question => text(question, 600, session.step === 'done')) ||
         (session.step === 'done' ? !date(session.closedOn) || session.exam.length < 2 || new Set(session.exam).size !== session.exam.length : session.closedOn !== null) ||
@@ -333,7 +423,7 @@ export function parseBackup(input: string): Backup | null {
     sessions.set(session.id, session as unknown as Session);
   }
 
-  const attempts: Attempt[] = [];
+  const schedules = new Map<string, ReturnType<typeof initialReview>>();
   const ids = new Set<string>();
   for (const attempt of value.study.attempts) {
     if (!object(attempt) || !text(attempt.id, 80, true) || ids.has(attempt.id) ||
@@ -345,10 +435,25 @@ export function parseBackup(input: string): Backup | null {
           !attempt.feedback.scores || bonus(attempt.feedback) > 3))) return null;
     const session = sessions.get(attempt.sessionId);
     if (!session?.closedOn || !session.exam[attempt.question]) return null;
-    const { due } = reviewSchedule(session, attempt.question, attempts);
+    const key = JSON.stringify([session.id, attempt.question]);
+    const schedule = schedules.get(key) ?? initialReview(session);
+    const { due } = schedule;
     if (!due || attempt.day < due) return null;
     ids.add(attempt.id);
-    attempts.push(attempt as unknown as Attempt);
+    schedules.set(key, advanceReview(schedule, attempt as unknown as Attempt));
+  }
+  if (value.study.reviewDrafts !== undefined) {
+    if (!Array.isArray(value.study.reviewDrafts)) return null;
+    const keys = new Set<string>();
+    for (const draft of value.study.reviewDrafts) {
+      if (!object(draft) || typeof draft.sessionId !== 'string' || !integer(draft.question, 0, 3) ||
+          !text(draft.answer, 4000, true)) return null;
+      const session = sessions.get(draft.sessionId);
+      if (!session?.closedOn || !session.exam[draft.question]) return null;
+      const key = JSON.stringify([session.id, draft.question]);
+      if (keys.has(key) || schedules.get(key)?.stage === 4) return null;
+      keys.add(key);
+    }
   }
   return value as unknown as Backup;
 }

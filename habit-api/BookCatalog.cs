@@ -24,12 +24,24 @@ internal sealed partial class BookCatalog(HttpClient client, IMemoryCache cache,
             catch (Exception error) when (Upstream(error))
             { return Results.Problem("No se pudo consultar la edición.", statusCode: 502); }
         });
+
+        app.MapGet("/api/catalog/editions", async (string? work, string? edition, int? offset, BookCatalog catalog,
+            CancellationToken cancellation) =>
+        {
+            if (work is null || !WorkId().IsMatch(work) || (edition is not null && !EditionId().IsMatch(edition)) ||
+                offset is < 0 or > int.MaxValue - EditionPageSize) return Results.BadRequest();
+            try { return Results.Ok(await catalog.EditionsAsync(work, edition, offset ?? 0, cancellation)); }
+            catch (Exception error) when (Upstream(error))
+            { return Results.Problem("No se pudieron consultar las ediciones.", statusCode: 502); }
+        });
     }
+
+    private const int EditionPageSize = 20;
 
     private async Task<CatalogMatch[]> SearchAsync(string query, CancellationToken cancellation)
     {
-        var isbn = query.Replace("-", "").Replace(" ", "");
-        var search = Isbn().IsMatch(isbn) ? "isbn:" + isbn : query;
+        var isbn = IsbnSeparators().Replace(query, "");
+        var search = Isbn().IsMatch(isbn) ? "isbn:" + isbn.ToUpperInvariant() : query;
         var path = "search.json?limit=8&lang=es&fields=key,title,author_name,cover_i,editions,editions.key,editions.title&q=" +
             Uri.EscapeDataString(search);
         var root = await GetAsync(path, cancellation);
@@ -48,6 +60,50 @@ internal sealed partial class BookCatalog(HttpClient client, IMemoryCache cache,
                 PositiveAt(item, "cover_i")));
         }
         return matches.ToArray();
+    }
+
+    private async Task<CatalogEditions> EditionsAsync(string work, string? preferred, int offset, CancellationToken cancellation)
+    {
+        var root = await GetAsync($"works/{work}/editions.json?limit={EditionPageSize}&offset={offset}", cancellation);
+        var entries = ArrayAt(root, "entries").Take(EditionPageSize).ToArray();
+        var editions = entries.Select(ReadEdition).OfType<CatalogEdition>().DistinctBy(item => item.Id).ToList();
+        if (offset == 0 && preferred is not null)
+        {
+            var edition = editions.Find(item => item.Id == preferred);
+            if (edition is null)
+            {
+                try
+                {
+                    var data = await GetAsync("books/" + preferred + ".json", cancellation);
+                    if (ArrayAt(data, "works").Any(link => TextAt(link, "key") == "/works/" + work))
+                        edition = ReadEdition(data);
+                }
+                catch (HttpRequestException error) when (error.StatusCode == HttpStatusCode.NotFound) { }
+            }
+            if (edition is not null)
+            {
+                editions.Remove(edition);
+                editions.Insert(0, edition);
+            }
+        }
+
+        var size = PositiveAt(root, "size");
+        var nextOffset = offset + entries.Length;
+        return new CatalogEditions(editions.ToArray(),
+            (size.HasValue ? nextOffset < size.Value : entries.Length == EditionPageSize) && entries.Length > 0 ? nextOffset : null);
+    }
+
+    private static CatalogEdition? ReadEdition(JsonElement data)
+    {
+        var id = TextAt(data, "key")?.Split('/').Last();
+        var title = TextAt(data, "title")?.Trim();
+        if (id is null || !EditionId().IsMatch(id) || string.IsNullOrEmpty(title)) return null;
+        var published = PublicationYear().Match(TextAt(data, "publish_date") ?? "");
+        var language = ArrayAt(data, "languages").Select(item => TextAt(item, "key")?.Split('/').Last())
+            .FirstOrDefault(code => code is not null && LanguageCode().IsMatch(code));
+        var pages = PositiveAt(data, "number_of_pages");
+        return new CatalogEdition(id, Shorten(title, 150), language, published.Success ? int.Parse(published.Value) : null,
+            pages <= 100_000 ? pages : null);
     }
 
     private async Task<CatalogDetail> DetailAsync(string work, string? edition, CancellationToken cancellation)
@@ -111,11 +167,16 @@ internal sealed partial class BookCatalog(HttpClient client, IMemoryCache cache,
     [GeneratedRegex(@"^OL[0-9]{1,12}W$")] private static partial Regex WorkId();
     [GeneratedRegex(@"^OL[0-9]{1,12}M$")] private static partial Regex EditionId();
     [GeneratedRegex(@"^(?:[0-9]{13}|[0-9]{9}[0-9Xx])$")] private static partial Regex Isbn();
+    [GeneratedRegex(@"[\s\p{Pd}]")] private static partial Regex IsbnSeparators();
+    [GeneratedRegex(@"\b[1-9][0-9]{3}\b")] private static partial Regex PublicationYear();
+    [GeneratedRegex(@"^[a-z]{3}$")] private static partial Regex LanguageCode();
     [GeneratedRegex(@"<[^>]*>", RegexOptions.NonBacktracking)] private static partial Regex Markup();
     [GeneratedRegex(@"\s+", RegexOptions.NonBacktracking)] private static partial Regex Whitespace();
 
     private sealed record CatalogMatch(string WorkId, string? EditionId, string Title, string Author, int? CoverId);
     private sealed record CatalogDetail(string? Summary, int? CoverId, int? TotalPages);
+    private sealed record CatalogEdition(string Id, string Title, string? Language, int? PublicationYear, int? TotalPages);
+    private sealed record CatalogEditions(CatalogEdition[] Editions, int? NextOffset);
 }
 
 internal sealed class CatalogThrottle : IDisposable

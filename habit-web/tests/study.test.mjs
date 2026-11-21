@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { addDays, formatStudyDay, localDay, parseBackup, progress, readingPercent, reminderCalendar, reviewSchedule } from '../src/study-data.ts';
+import {
+  addDays, formatStudyDay, libraryMatches, localDay, nextReadingSection, parseBackup, progress, readingPercent,
+  reminderCalendar, reviewSchedule, scheduledReviews, timerRemaining, updateReadingPage,
+} from '../src/study-data.ts';
 
 const session = {
   id: 'session', bookId: 'book', section: 'Capítulo 1', minutes: 10, step: 'done',
@@ -90,4 +93,45 @@ test('el respaldo valida vínculos, fechas, IDs y evaluaciones antes de restaura
     { ...backup, study: { ...backup.study, attempts: [attempt('2026-11-22'), attempt('2026-11-22')] } },
     { ...backup, study: { ...backup.study, sessions: [{ ...session, recallFeedback: { scores: [3, -1, 2] } }] } },
   ]) assert.equal(parseBackup(JSON.stringify(malformed)), null);
+});
+
+test('busca por palabras incompletas de título, autor y sección, sin tildes', () => {
+  const section = { id: 'chapter', title: 'Introducción a los vectores' };
+  const book = { id: 'book', title: 'Álgebra práctica', author: 'Ana Pérez', sections: [section] };
+  assert.deepEqual(libraryMatches([book], 'PER álG'), [{ book }]);
+  assert.deepEqual(libraryMatches([book], 'alge vect'), [{ book, section }]);
+  assert.deepEqual(libraryMatches([book], 'Pérez VEC química'), []);
+  assert.deepEqual(libraryMatches([book], '...'), []);
+});
+
+test('elige la próxima sección por página y valida el avance guardado', () => {
+  const next = { id: 'second', title: 'Segunda', endPage: 10 };
+  const book = { id: 'book', title: 'Libro', author: 'Autor', totalPages: 20, page: 4,
+    sections: [{ id: 'last', title: 'Final', endPage: 20 }, next, { id: 'first', title: 'Primera', endPage: 4 }] };
+  assert.equal(nextReadingSection(book), next);
+  assert.deepEqual(updateReadingPage(book, 10), { ...book, page: 10 });
+  assert.equal(updateReadingPage(book, 21), null);
+  assert.equal(updateReadingPage(book, 4.5), null);
+});
+
+test('lista los repasos futuros conservando el intervalo y omite los completados', () => {
+  const attempts = ['2026-11-22', '2026-11-25', '2026-11-30', '2026-12-07'].map(day => attempt(day));
+  assert.deepEqual(scheduledReviews([session], attempts).map(item => [item.index, item.due]), [[1, '2026-11-22']]);
+});
+
+test('recupera el temporizador en pausa, los borradores de repaso y el estado del libro desde el respaldo', () => {
+  const paused = { ...session, id: 'paused', step: 'read', closedOn: null, pausedRemainingMs: 120_000 };
+  const draft = { sessionId: session.id, question: 0, answer: 'Respuesta sin enviar.' };
+  const backup = {
+    version: 1,
+    books: [{ id: 'book', title: 'Libro', author: 'Autor', archived: true, language: 'spa', publicationYear: 2023, openedAt: 123 }],
+    study: { sessions: [session, paused], attempts: [], reviewDrafts: [draft] },
+  };
+  assert.equal(timerRemaining(paused, 0), timerRemaining(paused, 3_600_000));
+  assert.equal(timerRemaining({ ...paused, pausedRemainingMs: undefined, deadline: 3000 }, 1500), 1500);
+  assert.deepEqual(parseBackup(JSON.stringify(backup)), backup);
+  assert.equal(parseBackup(JSON.stringify({ ...backup, study: { ...backup.study, reviewDrafts: [draft, draft] } })), null);
+  assert.equal(parseBackup(JSON.stringify({ ...backup,
+    study: { ...backup.study, sessions: [session, { ...paused, deadline: 123 }] },
+  })), null);
 });

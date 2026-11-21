@@ -3,8 +3,9 @@ import { NgTemplateOutlet } from '@angular/common';
 import { BookDetail, StudyTarget, downloadFile } from './book-detail';
 import { NotebookPanel } from './notebook';
 import {
-  Attempt, Book, Feedback, Session, Study, bonus, emptyStudy, formatStudyDay, isFeedback, localDay,
-  makeBackup, parseBackup, progress, readStudy, restoreBackup, reviewSchedule, updateStudy,
+  Attempt, Book, Feedback, Session, Study, addDays, bonus, emptyStudy, formatStudyDay, isFeedback, localDay,
+  makeBackup, parseBackup, progress, readBooks, readStudy, restoreBackup, reviewSchedule, scheduledReviews,
+  timerRemaining, updateStudy,
 } from './study-data';
 
 type EvaluationType = 'brain_dump' | 'exam' | 'review';
@@ -22,6 +23,7 @@ export class StudyPanel {
   readonly booksRestored = output<Book[]>();
   readonly view = input.required<'today' | 'study' | 'settings' | 'book' | 'notebook'>();
   readonly bookId = input.required<string>();
+  readonly bookSectionId = input<string>();
   readonly studyTarget = input<StudyTarget | null>(null);
   readonly openStudy = output<StudyTarget | void>();
 
@@ -52,19 +54,36 @@ export class StudyPanel {
   readonly canEvaluate = computed(() => this.connected() && !!this.selectedProvider());
   readonly authBusy = signal(false);
   readonly restoreFile = signal<{ name: string; backup: NonNullable<ReturnType<typeof parseBackup>> } | null>(null);
+  private fileSelection = 0;
 
-  readonly due = computed(() => this.completed().flatMap(session => session.exam.flatMap((question, index) => {
-    const schedule = reviewSchedule(session, index, this.study().attempts);
-    return schedule.due && schedule.due <= this.today()
-      ? [{ key: session.id + '/' + index, session, index, question, ...schedule }] : [];
-  })).sort((a, b) => a.due!.localeCompare(b.due!)));
-  readonly reminders = computed(() => this.books().flatMap(book => book.reminder ? [{ book, reminder: book.reminder }] : [])
+  private readonly schedule = computed(() => scheduledReviews(this.completed(), this.study().attempts));
+  readonly due = computed(() => this.schedule().filter(item => item.due <= this.today()));
+  readonly nextReviews = computed(() => {
+    const today = this.today();
+    const week = Array.from({ length: 7 }, (_, index) => ({ day: addDays(today, index + 1), reviews: new Map<string, {
+      bookId: string; section: string; count: number;
+    }>(), count: 0 }));
+    const days = new Map(week.map(day => [day.day, day]));
+    for (const item of this.schedule()) {
+      const day = days.get(item.due);
+      if (!day) continue;
+      const { bookId, section } = item.session;
+      const key = JSON.stringify([bookId, section]);
+      const review = day.reviews.get(key) ?? { bookId, section, count: 0 };
+      review.count++;
+      day.count++;
+      day.reviews.set(key, review);
+    }
+    return week;
+  });
+  readonly activeBooks = computed(() => this.books().filter(book => !book.archived));
+  readonly reminders = computed(() => this.activeBooks().flatMap(book => book.reminder ? [{ book, reminder: book.reminder }] : [])
     .sort((a, b) => a.reminder.at - b.reminder.at));
-  readonly preferredBook = computed(() => this.books().find(book => book.id === this.studyTarget()?.bookId));
+  readonly preferredBook = computed(() => this.activeBooks().find(book => book.id === this.studyTarget()?.bookId));
 
   readonly remaining = computed(() => {
-    const deadline = this.draft()?.deadline;
-    const seconds = deadline ? Math.max(0, Math.ceil((deadline - this.now()) / 1000)) : 0;
+    const draft = this.draft();
+    const seconds = draft ? Math.ceil(timerRemaining(draft, this.now()) / 1000) : 0;
     return Math.floor(seconds / 60).toString().padStart(2, '0') + ':' + (seconds % 60).toString().padStart(2, '0');
   });
 
@@ -87,11 +106,11 @@ export class StudyPanel {
     if (typeof BroadcastChannel !== 'undefined') {
       this.channel = new BroadcastChannel('dager-habit-study');
       this.channel.onmessage = async event => {
-        if (event.data === 'restore') {
-          try { this.booksRestored.emit((await makeBackup(this.database())).books); }
+        if (event.data === 'restore' || event.data === 'books') {
+          try { this.booksRestored.emit(await readBooks(this.database())); }
           catch { this.error.set('No se pudo actualizar la biblioteca. Recargá la página.'); }
         }
-        await this.refresh();
+        if (event.data === 'study' || event.data === 'restore') await this.refresh();
       };
     }
     await this.refresh();
@@ -119,7 +138,7 @@ export class StudyPanel {
 
   applyBookChanges(books: Book[]): void {
     this.booksRestored.emit(books);
-    this.channel?.postMessage('restore');
+    this.channel?.postMessage('books');
   }
 
   async start(event: Event, bookId: string, sectionField: HTMLInputElement, minutes: string): Promise<void> {
@@ -131,7 +150,7 @@ export class StudyPanel {
       sectionField.reportValidity();
       return;
     }
-    if (!this.books().some(book => book.id === bookId)) return;
+    if (!this.activeBooks().some(book => book.id === bookId)) return;
     const target = this.studyTarget();
     const sectionId = target?.bookId === bookId && target.section?.title === section ? target.section.id : undefined;
     this.error.set('');
@@ -186,6 +205,7 @@ export class StudyPanel {
         const target = study.sessions.find(item => item.id === session.id && item.step === session.step);
         if (!target || !step) return;
         Object.assign(target, patch, { step });
+        delete target.pausedRemainingMs;
         if (step === 'done') {
           target.exam = candidate.exam;
           target.closedOn = localDay();
@@ -238,15 +258,51 @@ export class StudyPanel {
     if (session.deadline || this.saving()) return;
     const saved = await this.change(study => {
       const target = study.sessions.find(item => item.id === session.id && item.step === 'read');
-      if (target && !target.deadline) target.deadline = Date.now() + session.minutes * 60_000;
+      if (!target || target.deadline !== null) return;
+      target.deadline = Date.now() + (target.pausedRemainingMs ?? target.minutes * 60_000);
+      delete target.pausedRemainingMs;
     });
     if (saved) this.focusAfterRender('study-timer');
+  }
+
+  async pauseTimer(session: Session): Promise<void> {
+    if (!session.deadline || this.saving()) return;
+    const saved = await this.change(study => {
+      const target = study.sessions.find(item => item.id === session.id && item.step === 'read');
+      if (!target?.deadline) return;
+      const remaining = timerRemaining(target, Date.now());
+      if (remaining <= 0) return;
+      target.pausedRemainingMs = Math.min(remaining, target.minutes * 60_000);
+      target.deadline = null;
+    });
+    if (saved) this.focusAfterRender('study-timer');
+  }
+
+  focusPendingReviews(): void {
+    const heading = document.getElementById('reviews-heading');
+    const first = heading?.parentElement?.querySelector('article');
+    (first?.querySelector<HTMLElement>('textarea') ?? first?.querySelector('button') ?? heading)?.focus();
   }
 
   openReview(key: string): void {
     this.reviewing.set(key);
     this.error.set('');
     this.focusAfterRender('review-answer');
+  }
+
+  reviewDraft(sessionId: string, question: number): string {
+    return this.study().reviewDrafts?.find(draft => draft.sessionId === sessionId && draft.question === question)?.answer ?? '';
+  }
+
+  saveReviewDraft(sessionId: string, question: number, answer: string): void {
+    void this.change(study => {
+      const session = study.sessions.find(item => item.id === sessionId);
+      if (!session?.exam[question]) return;
+      const { due } = reviewSchedule(session, question, study.attempts);
+      if (!due || due > localDay()) return;
+      const otherDrafts = study.reviewDrafts?.filter(draft => draft.sessionId !== sessionId || draft.question !== question) ?? [];
+      study.reviewDrafts = answer.trim() ? [...otherDrafts, { sessionId, question, answer }] : otherDrafts;
+    });
   }
 
   async answer(event: SubmitEvent, session: Session, question: number, answer: string): Promise<void> {
@@ -269,6 +325,8 @@ export class StudyPanel {
           id, sessionId: target.id, question, day, answer: answer.trim(),
           remembered: (event.submitter as HTMLButtonElement | null)?.value === 'remembered',
         });
+        if (study.reviewDrafts)
+          study.reviewDrafts = study.reviewDrafts.filter(draft => draft.sessionId !== session.id || draft.question !== question);
       });
       if (this.study().attempts.some(attempt => attempt.id === id)) {
         this.reviewing.set('');
@@ -362,26 +420,31 @@ export class StudyPanel {
   async exportData(): Promise<void> {
     try {
       const backup = await makeBackup(this.database());
-      downloadFile(JSON.stringify(backup, null, 2), 'dager-habit-' + this.today() + '.json', 'application/json');
+      downloadFile(JSON.stringify(backup), 'dager-habit-' + this.today() + '.json', 'application/json');
     } catch { this.error.set('No se pudo generar el respaldo.'); }
   }
 
   async selectFile(input: HTMLInputElement): Promise<void> {
+    const selection = ++this.fileSelection;
     const file = input.files?.[0];
     this.restoreFile.set(null);
     this.error.set('');
     input.value = '';
     if (!file) return;
     try {
-      const backup = file.size <= 10 * 1024 * 1024 ? parseBackup(await file.text()) : null;
+      const content = await file.text();
+      if (selection !== this.fileSelection) return;
+      const backup = parseBackup(content);
       if (backup) {
         this.restoreFile.set({ name: file.name, backup });
         this.focusAfterRender('restore-heading');
       } else {
-        this.error.set('Elegí un respaldo JSON válido de hasta 10 MB.');
+        this.error.set('El archivo no es un respaldo válido de The Dager Habit.');
         this.focusAfterRender('study-error');
       }
-    } catch { this.error.set('No se pudo leer el archivo.'); }
+    } catch {
+      if (selection === this.fileSelection) this.error.set('No se pudo leer el archivo.');
+    }
   }
 
   async restore(): Promise<void> {

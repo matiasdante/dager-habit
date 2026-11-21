@@ -1,7 +1,8 @@
-import { Component, computed, input, output, signal } from '@angular/core';
+import { Component, Injector, afterNextRender, computed, effect, inject, input, output, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import {
-  Book, BookSection, ReadingReminder, Session, coverUrl, editBook, formatStudyDay, maxPages, readingPercent, reminderCalendar,
+  Book, BookSection, ReadingReminder, Session, coverUrl, editBook, formatStudyDay, languageName, maxPages, readingPercent,
+  reminderCalendar, updateReadingPage,
 } from './study-data';
 
 export interface StudyTarget {
@@ -11,18 +12,25 @@ export interface StudyTarget {
 
 const reminderDate = new Intl.DateTimeFormat('es-AR', { dateStyle: 'medium', timeStyle: 'short' });
 
-type BookArea = 'sections' | 'progress' | 'reminder';
+type BookArea = 'sections' | 'progress' | 'reminder' | 'details';
 
 @Component({ selector: 'app-book-detail', templateUrl: './book-detail.html', imports: [NgTemplateOutlet] })
 export class BookDetail {
   readonly book = input.required<Book>();
   readonly sessions = input.required<Session[]>();
+  readonly sectionId = input<string>();
   readonly database = input.required<IDBDatabase>();
   readonly changed = output<Book[]>();
   readonly study = output<StudyTarget>();
 
   readonly coverUrl = coverUrl;
   readonly maxPages = maxPages;
+  readonly languageName = languageName;
+  readonly languages = computed(() => {
+    const supported = ['spa', 'eng', 'por', 'fra', 'ita', 'deu'];
+    const custom = this.book().language;
+    return custom && !supported.includes(custom) ? [...supported, custom] : supported;
+  });
   readonly busy = signal(false);
   readonly message = signal<{ area: BookArea; text: string; error?: boolean } | null>(null);
   readonly formatDay = formatStudyDay;
@@ -30,6 +38,40 @@ export class BookDetail {
   readonly percent = computed(() => readingPercent(this.book()));
   readonly draft = computed(() => this.sessions().find(session => session.step !== 'done'));
   readonly completed = computed(() => this.sessions().filter(session => session.step === 'done').reverse());
+
+  constructor() {
+    const injector = inject(Injector);
+    effect(() => {
+      const id = this.sectionId();
+      if (!id) return;
+      afterNextRender(() => {
+        if (id !== this.sectionId()) return;
+        const heading = document.getElementById('book-section-' + id);
+        if (heading && !heading.closest('[hidden]')) heading.focus();
+      }, { injector });
+    });
+  }
+
+  async saveDetails(event: Event, title: HTMLInputElement, author: HTMLInputElement, year: HTMLInputElement,
+    language: HTMLSelectElement): Promise<void> {
+    event.preventDefault();
+    for (const field of [title, author]) {
+      if (!field.value.trim()) {
+        field.setCustomValidity(field === title ? 'Escribí el título.' : 'Escribí el nombre del autor.');
+        field.reportValidity();
+        return;
+      }
+    }
+    await this.change('details', book => ({
+      ...book, title: title.value.trim(), author: author.value.trim(),
+      publicationYear: year.value ? year.valueAsNumber : undefined, language: language.value || undefined,
+    }), 'Ficha actualizada.');
+  }
+
+  async setArchived(archived: boolean): Promise<void> {
+    await this.change('details', book => ({ ...book, archived }),
+      archived ? 'Libro archivado. Podés recuperarlo desde la colección.' : 'Libro devuelto a la colección.');
+  }
 
   formatReminder(reminder: ReadingReminder): string {
     return reminderDate.format(reminder.at);
@@ -45,7 +87,7 @@ export class BookDetail {
       page.reportValidity();
       return;
     }
-    await this.change('progress', book => ({ ...book, totalPages, page: currentPage }), 'Avance actualizado.');
+    await this.change('progress', book => updateReadingPage(book, currentPage, totalPages), 'Avance actualizado.');
   }
 
   async addSection(event: Event, input: HTMLInputElement, end: HTMLInputElement): Promise<void> {
@@ -79,8 +121,7 @@ export class BookDetail {
   async markPages(section: BookSection, heading: HTMLElement): Promise<void> {
     const end = section.endPage;
     if (!end) return;
-    const ok = await this.change('sections', book => !book.totalPages || end > book.totalPages
-      ? null : { ...book, page: Math.max(book.page ?? 0, end) },
+    const ok = await this.change('sections', book => updateReadingPage(book, Math.max(book.page ?? 0, end)),
     'Avance actualizado hasta la página ' + end + '.', 'No se pudo actualizar el avance. Revisá el total de páginas y volvé a intentar.');
     if (ok) heading.focus();
   }
