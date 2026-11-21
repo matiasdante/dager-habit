@@ -1,0 +1,109 @@
+<a class="skip-link" href="#main-content" (click)="$event.preventDefault(); content.focus()">Ir al contenido</a>
+<header class="site-header">
+  <div class="frame header-inner">
+    <div class="brand" translate="no"><span class="brand-mark" aria-hidden="true"></span><span>Dager Habit</span></div>
+    <nav class="main-nav" aria-label="Navegación principal">
+      <a href="#/" [attr.aria-current]="view() === 'library' ? 'page' : null">Biblioteca</a>
+      <a href="#/hoy" [attr.aria-current]="view() === 'today' ? 'page' : null">Hoy</a>
+      <a href="#/estudiar" [attr.aria-current]="view() === 'study' ? 'page' : null">Estudiar</a>
+      <a href="#/notebook" [attr.aria-current]="view() === 'notebook' ? 'page' : null" translate="no">NotebookLM</a>
+      <a href="#/ajustes" [attr.aria-current]="view() === 'settings' ? 'page' : null">Ajustes</a>
+    </nav>
+  </div>
+</header>
+
+<main class="frame" id="main-content" tabindex="-1" #content>
+<div [hidden]="view() !== 'library'">
+  <section class="hero" aria-labelledby="page-title">
+    <div class="hero-copy">
+      <h1 id="page-title" tabindex="-1">Biblioteca</h1>
+      <p>Guardá los libros que querés estudiar.</p>
+      <a class="primary-action hero-action" href="#new-book" (click)="$event.preventDefault(); newBook.focus()"><span aria-hidden="true">+</span> Agregar libro</a>
+    </div>
+    <div class="hero-image" aria-hidden="true"></div>
+  </section>
+
+  <div class="workspace">
+    <section class="collection" aria-labelledby="library-title">
+      <div class="collection-heading">
+        <h2 id="library-title">Colección</h2>
+        @if (ready()) {
+          <span class="book-count">{{ sortedBooks().length }} {{ sortedBooks().length === 1 ? 'libro' : 'libros' }}</span>
+        }
+      </div>
+      @if (storageError()) {
+        <p class="error" role="alert">{{ storageError() }}</p>
+      } @else if (loading()) {
+        <p role="status" class="collection-message">Cargando biblioteca…</p>
+      } @else if (sortedBooks().length) {
+        <ul class="book-list" role="list">
+          @for (book of sortedBooks(); track book.id; let index = $index) {
+            <li>
+              <a class="book-row book-link" [href]="bookLink(book.id)">
+                <span class="book-cover" aria-hidden="true" [attr.data-tone]="index % 4">
+                  @if (book.coverId) { <img [src]="covers(book.coverId)" alt="" width="36" height="48" loading="lazy" referrerpolicy="no-referrer" (error)="$any($event.target).hidden = true"> }
+                </span>
+                <div class="book-details"><h3>{{ book.title }}</h3><p>{{ book.author }}</p></div>
+                @if (percent(book) !== null) { <span class="book-percent"><span class="sr-only">Avance de lectura </span>{{ percent(book) }}&nbsp;%</span> }
+              </a>
+            </li>
+          }
+        </ul>
+      } @else if (ready()) {
+        <p class="collection-message">Todavía no agregaste libros.</p>
+      }
+    </section>
+    <aside class="entry" aria-labelledby="new-book">
+      <h2 id="new-book" #newBook tabindex="-1">Nuevo libro</h2>
+      <form (submit)="searchBooks($event, catalogQuery)" autocomplete="off">
+        <div class="field">
+          <label for="catalog-query">Buscar por título, autor o ISBN</label>
+          <input #catalogQuery id="catalog-query" name="catalog-query" type="search" minlength="2" maxlength="120" required (input)="catalogQuery.setCustomValidity('')">
+        </div>
+        <button class="primary-action" [disabled]="searching()">{{ searching() ? 'Buscando…' : 'Buscar en Open Library' }}</button>
+      </form>
+      <p class="status" role="status" [class.has-message]="catalogStatus()">{{ catalogStatus() }}</p>
+      <p class="error" role="alert" [class.has-message]="catalogError()">{{ catalogError() }}</p>
+      @if (catalog().length) {
+        <ul class="catalog-results" aria-label="Resultados del catálogo" role="list">
+          @for (match of catalog(); track match.editionId ?? match.workId) {
+            <li>
+              <strong>{{ match.title }}</strong><p>{{ match.author }}</p>
+              <button type="button" class="secondary-action" [disabled]="saving() || !ready()" (click)="importBook(match)">Agregar <span class="sr-only">{{ match.title }}</span></button>
+            </li>
+          }
+        </ul>
+      }
+      <details class="manual-entry">
+        <summary>Agregar manualmente</summary>
+        <form (submit)="addBook($event, title, author)" autocomplete="off">
+          <div class="field">
+            <label for="book-title">Título</label>
+            <input id="book-title" name="title" #title required maxlength="150" [readOnly]="saving()" (input)="title.setCustomValidity('')">
+          </div>
+          <div class="field">
+            <label for="book-author">Autor</label>
+            <input id="book-author" name="author" #author required maxlength="100" [readOnly]="saving()" (input)="author.setCustomValidity('')">
+          </div>
+          <button class="primary-action" type="submit" [disabled]="!ready() || saving()">
+            <span aria-hidden="true">+</span> {{ saving() ? 'Guardando…' : 'Agregar a la biblioteca' }}
+          </button>
+        </form>
+      </details>
+      <p class="storage-note">Los libros se guardan en este dispositivo.</p>
+      <p class="status" role="status" [class.has-message]="status()">{{ status() }}</p>
+      <p class="error" role="alert" [class.has-message]="error()">{{ error() }}</p>
+    </aside>
+
+  </div>
+</div>
+
+@if (database(); as storage) {
+  @let currentView = view();
+    <app-study [hidden]="currentView === 'library'" [database]="storage" [books]="sortedBooks()" [view]="currentView === 'library' ? 'today' : currentView"
+      [bookId]="bookId()" [studyTarget]="studyTarget()"
+      (booksRestored)="replaceBooks($event)" (openStudy)="selectStudy($event)" />
+} @else if (view() !== 'library') {
+  <p role="status">{{ storageError() || 'Cargando biblioteca…' }}</p>
+}
+</main>
