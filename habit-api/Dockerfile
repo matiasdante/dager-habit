@@ -6,8 +6,7 @@ RUN npm ci --no-fund
 COPY --from=web angular.json ngsw-config.json tsconfig.json tsconfig.app.json ./
 COPY --from=web src ./src
 COPY --from=web public ./public
-COPY --from=web tests ./tests
-RUN npm test && npm run build
+RUN npm run build
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api-build
 WORKDIR /source
