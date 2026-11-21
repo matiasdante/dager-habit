@@ -3,6 +3,7 @@ import { stagger } from 'animejs/utils';
 import { waapi } from 'animejs/waapi';
 import { Book, BookSection, coverUrl, editBook, languageName, libraryMatches, nextReadingSection, readingPercent, updateReadingPage } from './study-data';
 import { StudyTarget } from './book-detail';
+import { easeOut, enter, reducedMotion, slideIn } from './motion';
 import { StudyPanel } from './study';
 
 const initialBooks: Book[] = [
@@ -29,7 +30,12 @@ const viewTitles = {
   library: 'Biblioteca', today: 'Hoy', study: 'Sesión de estudio', settings: 'Ajustes',
   notebook: 'Resúmenes', about: 'Acerca de',
 };
-const easeOut = 'cubic-bezier(0.23, 1, 0.32, 1)';
+
+const rowEntry = {
+  opacity: [0.62, 1],
+  transform: ['translateY(16px)', 'translateY(0)'],
+  duration: 250,
+};
 
 @Component({
   selector: 'app-root',
@@ -39,15 +45,13 @@ const easeOut = 'cubic-bezier(0.23, 1, 0.32, 1)';
 export class App {
   private readonly injector = inject(Injector);
   private readonly opening = viewChild.required<ElementRef<HTMLDivElement>>('opening');
-  private readonly libraryHeading = viewChild<ElementRef<HTMLDivElement>>('libraryHeading');
-  private readonly heroPhoto = viewChild<ElementRef<HTMLImageElement>>('heroPhoto');
+  private readonly bookList = viewChild<ElementRef<HTMLUListElement>>('bookList');
   private readonly catalogList = viewChild<ElementRef<HTMLUListElement>>('catalogList');
   private readonly studyPanel = viewChild(StudyPanel);
-  private readonly reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  private pendingCollectionEntry = false;
   private catalogRequest?: AbortController;
   private editionRequest?: AbortController;
   private lastOpened = '';
-  readonly openingLines = [['The', 'Dager'], ['Habit']];
   private readonly books = signal<Book[]>([]);
   private readonly collator = new Intl.Collator('es-AR', { sensitivity: 'base', numeric: true });
   readonly database = signal<IDBDatabase | null>(null);
@@ -90,10 +94,10 @@ export class App {
   }
 
   private readRoute(focus = false): void {
-    const previousView = this.view();
     const revisiting = history.state?.habitVisited === true;
     if (!revisiting) history.replaceState({ ...history.state, habitVisited: true }, '');
-    const [pathname, query] = location.hash.slice(1).split('?');
+    const hash = location.hash;
+    const [pathname, query] = hash.slice(1).split('?');
     const path = pathname || '/';
     const book = path.match(/^\/libros\/([^/]+)$/);
     const study = path.match(/^\/estudiar\/([^/]+)$/);
@@ -113,13 +117,26 @@ export class App {
     } else {
       this.view.set((Object.keys(routes) as (keyof typeof routes)[]).find(route => routes[route] === path) ?? 'library');
     }
-    if (focus) afterNextRender(() => {
+    const view = this.view();
+    this.pendingCollectionEntry = !revisiting && view === 'library';
+    if (!focus && (revisiting || view === 'library')) return;
+    afterNextRender(() => {
+      if (location.hash !== hash) return;
       const main = document.getElementById('main-content');
+      const visibleView = main?.querySelector(':scope > :not([hidden])');
+      const heading = visibleView?.querySelector<HTMLElement>('h1:not([hidden] *)');
       const sectionId = this.bookSectionId();
-      const chapter = this.view() === 'book' && sectionId && this.books().find(book => book.id === this.bookId())
+      const chapter = view === 'book' && sectionId && this.books().find(book => book.id === this.bookId())
         ?.sections?.some(section => section.id === sectionId);
-      if (!chapter) (main?.querySelector<HTMLElement>('h1:not([hidden] *)') ?? main)?.focus({ preventScroll: revisiting });
-      if (!revisiting && previousView !== 'library') this.revealLibrary();
+      if (focus && !chapter) (heading ?? main)?.focus({ preventScroll: revisiting });
+      if (revisiting) return;
+      if (view === 'library') {
+        this.revealCollection();
+      } else if (visibleView && heading) {
+        const header = heading.closest<HTMLElement>('header, .book-masthead') ?? heading;
+        const cards = visibleView.querySelectorAll<HTMLElement>('.study-card:not(dialog, [hidden], [hidden] *)');
+        enter([header, ...Array.from(cards).slice(0, 3)], { ...slideIn, delay: stagger(30) });
+      }
     }, { injector: this.injector });
   }
 
@@ -195,16 +212,18 @@ export class App {
         this.storageError.set('');
         this.loading.set(false);
         this.ready.set(true);
+        if (this.pendingCollectionEntry) {
+          afterNextRender(() => this.revealCollection(), { injector: this.injector });
+        }
       };
       read.onerror = () => this.showStorageError('No se pudo leer la biblioteca. Recargá para volver a intentar.');
     };
   }
 
   private playOpening(): void {
-    if (this.view() !== 'library' || this.reducedMotion.matches) return;
+    if (this.view() !== 'library' || reducedMotion.matches) return;
 
     const opening = this.opening().nativeElement;
-    const letters = opening.querySelectorAll<HTMLElement>('.opening-letter');
     const listeners = new AbortController();
     const finish = () => {
       opening.hidden = true;
@@ -212,12 +231,6 @@ export class App {
     };
 
     opening.hidden = false;
-    const reveal = waapi.animate(letters, {
-      transform: ['translateY(115%)', 'translateY(0)'],
-      delay: stagger(27, { ease: 'out(2)' }),
-      duration: 310,
-      ease: easeOut,
-    });
     const exit = waapi.animate(opening, {
       opacity: [1, 0],
       delay: 690,
@@ -225,40 +238,30 @@ export class App {
       ease: easeOut,
       onComplete: () => {
         finish();
-        this.revealLibrary();
+        this.revealCollection();
       },
     });
 
     const stop = () => {
       finish();
-      reveal.cancel();
       exit.cancel();
+      this.revealCollection();
     };
     const options = { signal: listeners.signal, capture: true, passive: true };
     window.addEventListener('keydown', stop, options);
     window.addEventListener('pointerdown', stop, options);
     window.addEventListener('focusin', stop, options);
     window.addEventListener('wheel', stop, options);
-    this.reducedMotion.addEventListener('change', stop, options);
+    reducedMotion.addEventListener('change', stop, options);
   }
 
-  private revealLibrary(): void {
-    if (this.view() !== 'library' || this.reducedMotion.matches) return;
-    const heading = this.libraryHeading()?.nativeElement;
-    const photo = this.heroPhoto()?.nativeElement;
-    if (!heading || !photo) return;
+  private revealCollection(): void {
+    if (!this.pendingCollectionEntry || !this.opening().nativeElement.hidden) return;
+    const rows = this.bookList()?.nativeElement.querySelectorAll<HTMLLIElement>(':scope > li:nth-child(-n+6)');
+    if (!rows?.length) return;
 
-    waapi.animate(heading, {
-      opacity: [0.68, 1],
-      transform: ['translateY(14px)', 'translateY(0)'],
-      duration: 280,
-      ease: easeOut,
-    });
-    waapi.animate(photo, {
-      transform: ['scale(1.12)', 'scale(1)'],
-      duration: 420,
-      ease: easeOut,
-    });
+    this.pendingCollectionEntry = false;
+    enter(rows, { ...rowEntry, delay: stagger(32, { ease: 'out(2)' }) });
   }
 
   addBook(event: Event, title: HTMLInputElement, author: HTMLInputElement): void {
@@ -309,7 +312,7 @@ export class App {
       } else {
         this.catalogStatus.set('No encontramos coincidencias. Probá con otra búsqueda o agregá el libro manualmente.');
       }
-      if (matches.length && !this.reducedMotion.matches) {
+      if (matches.length && !reducedMotion.matches) {
         afterNextRender(() => this.revealCatalog(), { injector: this.injector });
       }
     } catch {
@@ -360,16 +363,10 @@ export class App {
 
   private revealCatalog(): void {
     const list = this.catalogList()?.nativeElement;
-    if (!list || this.reducedMotion.matches || this.view() !== 'library') return;
+    if (!list || this.view() !== 'library') return;
 
     const rows = list.querySelectorAll<HTMLLIElement>(':scope > li:nth-child(-n+4)');
-    waapi.animate(rows, {
-      opacity: [0.62, 1],
-      transform: ['translateY(16px)', 'translateY(0)'],
-      delay: stagger(32, { ease: 'out(2)' }),
-      duration: 250,
-      ease: easeOut,
-    });
+    enter(rows, { ...rowEntry, delay: stagger(32, { ease: 'out(2)' }) });
   }
 
   async chooseEditions(match: CatalogMatch, offset = 0): Promise<void> {
