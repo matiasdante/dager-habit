@@ -8,9 +8,18 @@
   <div>
     <h1 id="book-heading" tabindex="-1">{{ book().title }}</h1>
     <p class="book-author">{{ book().author }}</p>
+    @if (book().language || book().publicationYear) {
+      <p class="storage-note">
+        @if (book().language; as language) { {{ languageName(language) }} }
+        @if (book().language && book().publicationYear) { · }
+        {{ book().publicationYear }}
+      </p>
+    }
     @if (book().summary) { <p class="edition-summary">{{ book().summary }}</p> }
     <div class="book-actions">
-      <button class="primary-action" type="button" (click)="start()">{{ draft() ? 'Continuar sesión' : 'Empezar sesión' }}</button>
+      @if (!book().archived || draft()) {
+        <button class="primary-action" type="button" (click)="start()">{{ draft() ? 'Continuar sesión' : 'Empezar sesión' }}</button>
+      }
       <a class="back-link" href="#reading-progress" (click)="$event.preventDefault(); readingProgress.focus()">Ir al avance</a>
     </div>
   </div>
@@ -24,7 +33,7 @@
       @for (section of book().sections ?? []; track section.id) {
         <div class="section-row">
           <div>
-            <h3 #sectionHeading tabindex="-1">{{ section.title }}</h3>
+            <h3 #sectionHeading [id]="'book-section-' + section.id" tabindex="-1">{{ section.title }}</h3>
             @if (section.endPage) { <p class="storage-note">Hasta la pág. {{ section.endPage }}</p> }
             @if (studied(section)) { <p class="storage-note">Con sesión completada</p> }
           </div>
@@ -32,7 +41,9 @@
             @if (section.endPage && section.endPage <= (book().totalPages ?? 0) && section.endPage > (book().page ?? 0)) {
               <button class="secondary-action" type="button" [disabled]="busy()" (click)="markPages(section, sectionHeading)">Marcar leída <span class="sr-only">{{ section.title }}</span></button>
             }
-            <button class="secondary-action" type="button" [disabled]="!!draft() && draft()?.sectionId !== section.id" (click)="start(section)">{{ draft()?.sectionId === section.id ? 'Continuar sesión' : 'Estudiar' }} <span class="sr-only">{{ section.title }}</span></button>
+            @if (!book().archived || draft()?.sectionId === section.id) {
+              <button class="secondary-action" type="button" [disabled]="!!draft() && draft()?.sectionId !== section.id" (click)="start(section)">{{ draft()?.sectionId === section.id ? 'Continuar sesión' : 'Estudiar' }} <span class="sr-only">{{ section.title }}</span></button>
+            }
           </div>
         </div>
       } @empty { <p>Agregá los capítulos o las secciones que quieras estudiar.</p> }
@@ -97,6 +108,31 @@
       </form>
       <ng-container [ngTemplateOutlet]="feedback" [ngTemplateOutletContext]="{ $implicit: 'reminder' }" />
     </section>
+    <details class="study-card">
+      <summary>Editar ficha</summary>
+      <form class="study-form" (submit)="saveDetails($event, title, author, year, language)">
+        <label for="edit-title">Título</label>
+        <input #title id="edit-title" [value]="book().title" maxlength="150" required (input)="title.setCustomValidity('')">
+        <label for="edit-author">Autor</label>
+        <input #author id="edit-author" [value]="book().author" maxlength="100" required (input)="author.setCustomValidity('')">
+        <label for="edit-year">Año de la edición (opcional)</label>
+        <input #year id="edit-year" type="number" inputmode="numeric" min="1" max="9999" [value]="book().publicationYear ?? ''">
+        <label for="edit-language">Idioma de la edición (opcional)</label>
+        <select #language id="edit-language">
+          <option value="" [selected]="!book().language">Sin informar</option>
+          @for (code of languages(); track code) {
+            <option [value]="code" [selected]="book().language === code">{{ languageName(code) }}</option>
+          }
+        </select>
+        <button class="primary-action" [disabled]="busy()">Guardar ficha</button>
+      </form>
+      <div class="study-actions">
+        <button class="secondary-action" type="button" [disabled]="busy()" (click)="setArchived(!book().archived)">
+          {{ book().archived ? 'Devolver a la colección' : 'Archivar libro' }}
+        </button>
+      </div>
+      <ng-container [ngTemplateOutlet]="feedback" [ngTemplateOutletContext]="{ $implicit: 'details' }" />
+    </details>
   </div>
 </div>
 <ng-template #feedback let-area>

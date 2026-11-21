@@ -39,7 +39,7 @@
         <h1 id="page-title" tabindex="-1">Biblioteca</h1>
         <p>Guardá los libros que querés estudiar.</p>
       </div>
-      <button type="button" class="primary-action hero-action" [class.is-pending]="loading()" (click)="catalogQuery.focus()"><span aria-hidden="true">+</span> Agregar libro</button>
+      <button type="button" class="primary-action hero-action" [class.is-pending]="loading()" (click)="bookQuery.focus()"><span aria-hidden="true">+</span> Buscar o agregar libro</button>
     </div>
     @if (view() === 'library') {
       <div class="hero-image" aria-hidden="true">
@@ -51,19 +51,53 @@
   <div class="library-content">
     <section class="entry" [hidden]="loading()" aria-labelledby="new-book">
       <h2 id="new-book">Buscar libros</h2>
-      <form class="catalog-search" role="search" aria-label="Catálogo de Open Library" autocomplete="off" (submit)="searchBooks($event, catalogQuery)">
+      <form class="catalog-search" role="search" aria-label="Buscar libros" autocomplete="off" (submit)="searchBooks($event, bookQuery)">
         <div class="catalog-field">
-          <label for="catalog-query" class="sr-only">Título, autor o ISBN</label>
+          <label for="catalog-query" class="sr-only">Título, autor, capítulo o ISBN</label>
           <span class="catalog-icon" aria-hidden="true"></span>
-          <input #catalogQuery id="catalog-query" name="catalog-query" type="search" enterkeyhint="search"
-            placeholder="Título, autor o ISBN…" minlength="2" maxlength="120" required (input)="catalogInputChanged(catalogQuery)">
-          <button class="catalog-clear" type="button" aria-label="Limpiar búsqueda" (click)="clearCatalogSearch(catalogQuery)"><span aria-hidden="true">×</span></button>
+          <input #bookQuery id="catalog-query" name="catalog-query" type="search" enterkeyhint="search"
+            placeholder="Título, autor, capítulo o ISBN…" maxlength="120"
+            (input)="catalogInputChanged(bookQuery)" (keydown.enter)="openSearchMatch($event, bookQuery)">
+          @if (catalogQuery()) {
+            <button class="catalog-clear" type="button" aria-label="Limpiar búsqueda" (click)="clearCatalogSearch(bookQuery)"><span aria-hidden="true">×</span></button>
+          }
         </div>
-        <button class="primary-action" type="submit" [attr.aria-disabled]="searching() ? 'true' : null">Buscar</button>
+        <button class="primary-action" type="submit" [disabled]="searching() || catalogQuery().trim().length < 2">Buscar en Open Library</button>
       </form>
+      @if (catalogQuery().trim()) {
+        <div class="local-results">
+          <h3>{{ archived() ? 'En archivados' : 'En tu biblioteca' }}</h3>
+          <p class="sr-only" role="status">{{ localMatches().length }} coincidencias en la colección</p>
+          @if (localMatches().length) {
+            <ul class="search-hits">
+              @for (hit of localMatches(); track hit.section ?? hit.book) {
+                <li>
+                  <a [href]="bookLink(hit.book.id, hit.section?.id)">
+                    {{ hit.section?.title ?? hit.book.title }}
+                    <span>{{ hit.section ? hit.book.title : hit.book.author }}</span>
+                  </a>
+                  @if (!hit.section && hasStudyDraft(hit.book.id)) {
+                    <button class="secondary-action" type="button" (click)="selectStudy({ bookId: hit.book.id })">Continuar <span class="sr-only">sesión de {{ hit.book.title }}</span></button>
+                  }
+                </li>
+              }
+            </ul>
+          } @else { <p class="storage-note">Sin coincidencias en esta colección.</p> }
+        </div>
+      } @else if (recentBooks().length) {
+        <div class="local-results">
+          <h3>Abiertos recientemente</h3>
+          <ul class="search-hits">
+            @for (book of recentBooks(); track book.id) {
+              <li><a [href]="bookLink(book.id)">{{ book.title }} <span>{{ book.author }}</span></a></li>
+            }
+          </ul>
+        </div>
+      }
       <p class="status" role="status" [class.has-message]="catalogStatus()">{{ catalogStatus() }}</p>
       <p class="error" role="alert" [class.has-message]="catalogError()">{{ catalogError() }}</p>
       @if (catalog().length) {
+        <h3 class="catalog-heading">En Open Library</h3>
         <ul #catalogList class="catalog-results" aria-label="Resultados del catálogo" role="list">
           @for (match of catalog(); track match.editionId ?? match.workId) {
             <li>
@@ -71,10 +105,45 @@
                 @if (match.coverId) { <img [src]="covers(match.coverId)" alt="" width="36" height="48" loading="lazy" referrerpolicy="no-referrer" (error)="$any($event.target).hidden = true"> }
               </span>
               <div><strong>{{ match.title }}</strong><p>{{ match.author }}</p></div>
-              <button type="button" class="secondary-action" [disabled]="saving() || !ready()" (click)="importBook(match)">Agregar <span class="sr-only">{{ match.title }}</span></button>
+              <button type="button" class="secondary-action" [disabled]="saving() || !ready()" (click)="chooseEditions(match)">Ver ediciones <span class="sr-only">de {{ match.title }}</span></button>
             </li>
           }
         </ul>
+      }
+      @if (editionPicker(); as picker) {
+        <section class="edition-picker" id="catalog-editions" aria-labelledby="editions-heading">
+          <div class="collection-heading">
+            <h3 id="editions-heading" tabindex="-1">Ediciones de {{ picker.match.title }}</h3>
+            <button class="secondary-action" type="button" (click)="closeEditions()">Cerrar ediciones</button>
+          </div>
+          @if (loadingEditions()) { <p role="status">Cargando ediciones…</p> }
+          <ul class="search-hits">
+            @for (edition of picker.editions; track edition.id) {
+              <li>
+                <div>
+                  <strong>{{ edition.title }}</strong>
+                  <span>{{ edition.language ? languageName(edition.language) : 'Idioma sin informar' }} · {{ edition.publicationYear ?? 'Año sin informar' }}{{ edition.totalPages ? ' · ' + edition.totalPages + ' págs.' : '' }}</span>
+                </div>
+                @if (catalogBooks().get(edition.id); as existing) {
+                  <a class="secondary-action" [href]="bookLink(existing.id)">Abrir ficha <span class="sr-only">de {{ edition.title }}</span></a>
+                } @else {
+                  <button class="secondary-action" type="button" [disabled]="saving()" (click)="importBook(picker.match, edition)">Agregar <span class="sr-only">{{ edition.title }}</span></button>
+                }
+              </li>
+            }
+          </ul>
+          @if (picker.nextOffset !== null) {
+            <button class="secondary-action" type="button" [disabled]="loadingEditions() || saving()" (click)="chooseEditions(picker.match, picker.nextOffset)">Cargar más ediciones</button>
+          }
+          @if (!picker.editions.length && !loadingEditions() && !catalogError()) {
+            <p>No encontramos ediciones para este libro.</p>
+            @if (catalogBooks().get(picker.match.workId); as existing) {
+              <a class="secondary-action" [href]="bookLink(existing.id)">Abrir ficha</a>
+            } @else {
+              <button class="secondary-action" type="button" [disabled]="saving()" (click)="importBook(picker.match)">Agregar sin edición</button>
+            }
+          }
+        </section>
       }
       <details class="manual-entry">
         <summary>Agregar manualmente</summary>
@@ -99,16 +168,24 @@
       <div class="collection-heading">
         <h2 id="library-title">Colección</h2>
         @if (ready()) {
-          <span class="book-count">{{ sortedBooks().length }} {{ sortedBooks().length === 1 ? 'libro' : 'libros' }}</span>
+          <span class="book-count">{{ collection().length }} {{ collection().length === 1 ? 'libro' : 'libros' }}</span>
         }
       </div>
+      @if (ready() && (archivedCount() || archived())) {
+        <div class="study-actions" aria-label="Filtrar colección">
+          <button class="secondary-action" type="button" [attr.aria-pressed]="!archived()" (click)="archived.set(false)">Activos</button>
+          <button class="secondary-action" type="button" [attr.aria-pressed]="archived()" (click)="archived.set(true)">Archivados ({{ archivedCount() }})</button>
+        </div>
+      }
+      <p class="status" role="status" [class.has-message]="collectionStatus()">{{ collectionStatus() }}</p>
+      <p class="error" role="alert" [class.has-message]="collectionError()">{{ collectionError() }}</p>
       @if (storageError()) {
         <p class="error" role="alert">{{ storageError() }}</p>
       } @else if (loading()) {
         <p role="status" class="collection-message">Cargando biblioteca…</p>
-      } @else if (sortedBooks().length) {
+      } @else if (collection().length) {
         <ul class="book-list" role="list">
-          @for (book of sortedBooks(); track book.id; let index = $index) {
+          @for (book of collection(); track book.id; let index = $index) {
             <li>
               <a class="book-row book-link" [href]="bookLink(book.id)">
                 <span class="book-cover" aria-hidden="true" [attr.data-tone]="index % 4">
@@ -117,11 +194,25 @@
                 <div class="book-details"><h3>{{ book.title }}</h3><p>{{ book.author }}</p></div>
                 @if (percent(book) !== null) { <span class="book-percent"><span class="sr-only">Avance de lectura </span>{{ percent(book) }}&nbsp;%</span> }
               </a>
+              @if (book.totalPages && !book.archived) {
+                <details class="quick-progress">
+                  <summary>Actualizar avance <span class="sr-only">de {{ book.title }}</span></summary>
+                  <form (submit)="saveQuickPage($event, book.id, quickPage)">
+                    <label [attr.for]="'quick-page-' + book.id">Última página leída</label>
+                    <input #quickPage [id]="'quick-page-' + book.id" type="number" inputmode="numeric"
+                      required min="0" [max]="book.totalPages" [value]="book.page ?? 0">
+                    <button class="secondary-action" type="submit" [disabled]="saving()">Guardar página</button>
+                  </form>
+                  @if (nextReadingSection(book); as chapter) {
+                    <button class="secondary-action" type="button" [disabled]="saving()" (click)="markNextSection(book.id, chapter)">Marcar «{{ chapter.title }}» como leída</button>
+                  }
+                </details>
+              }
             </li>
           }
         </ul>
       } @else if (ready()) {
-        <p class="collection-message">Todavía no agregaste libros.</p>
+        <p class="collection-message">{{ archived() ? 'No hay libros archivados.' : 'No hay libros activos en tu colección.' }}</p>
       }
       @if (ready()) { <p class="storage-note">Los libros se guardan en este dispositivo.</p> }
     </section>
@@ -167,7 +258,7 @@
 
 @if (database(); as storage) {
   <app-study [hidden]="panelView === null" [database]="storage" [books]="sortedBooks()" [view]="panelView ?? 'today'"
-    [bookId]="bookId()" [studyTarget]="studyTarget()"
+    [bookId]="bookId()" [bookSectionId]="bookSectionId()" [studyTarget]="studyTarget()"
     (booksRestored)="replaceBooks($event)" (openStudy)="selectStudy($event)" />
 } @else if (panelView) {
   <p role="status">{{ storageError() || 'Cargando biblioteca…' }}</p>

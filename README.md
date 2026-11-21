@@ -28,9 +28,9 @@ La biblioteca y las sesiones funcionan sin claves. Si querés evaluaciones con I
 
 ## Cómo funciona
 
-1. Buscá un libro por título, autor o ISBN en Open Library o agregalo manualmente. Desde su ficha podés registrar páginas, secciones y recordatorios.
-2. Empezá una sesión de 10 o 15 minutos. Prepará preguntas, leé, anotá lo que recordás y armá el examen para el repaso.
-3. Volvé a **Hoy** para responder las preguntas cuando venzan. El seguimiento usa días de Buenos Aires y el calendario de repaso de 2, 3, 5 y 7 días.
+1. Buscá por título, autor o capítulo en tu biblioteca. Para sumar un libro, buscá por título, autor o ISBN en Open Library y elegí la edición, o agregalo manualmente. Podés guardar la última página leída desde la colección y editar o archivar libros desde su ficha.
+2. Empezá una sesión de 10 o 15 minutos. Prepará preguntas, leé, anotá lo que recordás y armá el examen para el repaso. Si pausás el temporizador, la app conserva el tiempo restante.
+3. Volvé a **Hoy** para responder las preguntas pendientes o consultar los próximos siete días. Las respuestas en curso se guardan como borrador. El seguimiento usa días de Buenos Aires y un calendario de repaso de 2, 3, 5 y 7 días.
 
 La interfaz es una PWA en Angular 22. La API en ASP.NET Core 10 sirve la web y conecta con Open Library, los proveedores de IA y, si lo configurás, NotebookLM Enterprise. El contenedor reúne la web y la API.
 

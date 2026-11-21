@@ -41,7 +41,7 @@ Configurá en el servidor un modelo por cada proveedor que quieras habilitar. El
 
 ## Catálogo de libros
 
-Open Library permite buscar por título, autor o ISBN y aporta una descripción breve, portada y páginas cuando el catálogo tiene esos datos. El ISBN ayuda a identificar la edición. Configurá un correo operativo en `OPENLIBRARY_CONTACT` para identificar la integración ante Open Library. El total de páginas se puede corregir en la ficha del libro.
+Open Library permite buscar por título, autor o ISBN. La API devuelve ediciones paginadas en `GET /api/catalog/editions?work=OL…W`, con idioma, año y cantidad de páginas cuando el catálogo tiene esos datos. La búsqueda por ISBN admite espacios y guiones y prioriza la edición encontrada. Configurá un correo operativo en `OPENLIBRARY_CONTACT` para identificar la integración ante Open Library. El total de páginas se puede corregir en la ficha del libro.
 
 ## NotebookLM
 

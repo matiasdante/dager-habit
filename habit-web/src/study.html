@@ -8,12 +8,22 @@
       @case ('today') {
         <header class="study-heading">
           <h1 id="today-heading" tabindex="-1">Hoy</h1>
-          @if (books().length) {
-            <button class="primary-action" type="button" (click)="openStudy.emit()">{{ draft() ? 'Continuar sesión' : 'Empezar sesión' }}</button>
+          @if (draft(); as current) {
+            <div class="study-actions">
+              <p>{{ title(current.bookId) }} · {{ current.section }}</p>
+              <button class="primary-action" type="button" (click)="openStudy.emit({ bookId: current.bookId })">Continuar sesión</button>
+            </div>
+          } @else if (activeBooks().length) {
+            <button class="primary-action" type="button" (click)="openStudy.emit()">Empezar sesión</button>
           } @else {
             <a class="primary-action" href="#/">Ir a la biblioteca</a>
           }
         </header>
+        @if (due().length) {
+          <button class="secondary-action pending-reviews" type="button" (click)="focusPendingReviews()">
+            Ir a {{ due().length === 1 ? '1 repaso pendiente' : due().length + ' repasos pendientes' }}
+          </button>
+        }
         <dl class="progress-data">
           <div><dt>Nivel</dt><dd>{{ stats().level }}</dd></div>
           <div><dt>Experiencia</dt><dd>{{ stats().xp }} XP</dd></div>
@@ -36,12 +46,15 @@
           <h2 id="reviews-heading" tabindex="-1">Repasos pendientes</h2>
           @for (item of due(); track item.key) {
             <article class="review-row">
-              <p class="storage-note">{{ title(item.session.bookId) }} · {{ item.session.section }} · {{ formatDay(item.due!) }}</p>
+              <p class="storage-note">{{ title(item.session.bookId) }} · {{ item.session.section }} · {{ formatDay(item.due) }}</p>
               <h3>{{ item.question }}</h3>
               @if (reviewing() === item.key) {
                 <form class="study-form" autocomplete="off" (submit)="answer($event, item.session, item.index, reviewAnswer.value)">
                   <label for="review-answer">Tu respuesta</label>
-                  <textarea #reviewAnswer id="review-answer" name="review-answer" rows="4" maxlength="4000" required (input)="reviewAnswer.setCustomValidity('')"></textarea>
+                  <textarea #reviewAnswer id="review-answer" name="review-answer" rows="4" maxlength="4000" required
+                    [defaultValue]="reviewDraft(item.session.id, item.index)"
+                    (input)="reviewAnswer.setCustomValidity(''); saveReviewDraft(item.session.id, item.index, reviewAnswer.value)"></textarea>
+                  @if (pendingWrites()) { <p class="storage-note">Guardando borrador…</p> }
                   <div class="study-actions">
                     <button class="primary-action" value="remembered" [disabled]="saving()">Recordé</button>
                     <button class="secondary-action" value="retry" [disabled]="saving()">Me costó</button>
@@ -52,6 +65,23 @@
               }
             </article>
           } @empty { <p>No tenés repasos pendientes para hoy.</p> }
+        </section>
+        <section class="study-card">
+          <h2>Próximos repasos</h2>
+          @for (day of nextReviews(); track day.day) {
+            @if (day.count) {
+              <details class="review-row">
+                <summary>{{ formatDay(day.day) }} · {{ day.count === 1 ? '1 repaso' : day.count + ' repasos' }}</summary>
+                <ul>
+                  @for (item of day.reviews.values(); track item) {
+                    <li><a [href]="bookUrl(item.bookId)">{{ title(item.bookId) }}</a> · {{ item.section }} · {{ item.count }}</li>
+                  }
+                </ul>
+              </details>
+            } @else {
+              <p class="review-row">{{ formatDay(day.day) }} · 0 repasos</p>
+            }
+          }
         </section>
         @if (study().attempts.length) {
           <details class="study-card">
@@ -110,8 +140,15 @@
               }
               @case ('read') {
                 <h2 id="step-heading" tabindex="-1">Lectura enfocada</h2>
-                <p class="timer" id="study-timer" role="timer" tabindex="-1" [attr.aria-label]="session.deadline ? 'Tiempo restante' : 'Duración elegida'">{{ session.deadline ? remaining() : session.minutes + ':00' }}</p>
-                @if (!session.deadline) { <button class="secondary-action" type="button" (click)="startTimer(session)">Iniciar temporizador</button> }
+                <p class="timer" id="study-timer" role="timer" tabindex="-1" [attr.aria-label]="session.deadline || session.pausedRemainingMs ? 'Tiempo restante' : 'Duración elegida'">{{ session.deadline || session.pausedRemainingMs ? remaining() : session.minutes + ':00' }}</p>
+                @if (session.pausedRemainingMs) {
+                  <p role="status">Temporizador en pausa.</p>
+                  <button class="secondary-action" type="button" (click)="startTimer(session)">Reanudar temporizador</button>
+                } @else if (session.deadline && remaining() !== '00:00') {
+                  <button class="secondary-action" type="button" (click)="pauseTimer(session)">Pausar temporizador</button>
+                } @else if (!session.deadline) {
+                  <button class="secondary-action" type="button" (click)="startTimer(session)">Iniciar temporizador</button>
+                }
                 <p role="status">{{ session.deadline && remaining() === '00:00' ? 'Terminó el tiempo de lectura. Podés continuar.' : '' }}</p>
                 <form class="study-form" autocomplete="off" (submit)="advance($event, session, { notes: notes.value })">
                   <label for="reading-notes">Apuntes opcionales</label>
@@ -161,14 +198,14 @@
         } @else {
           <section class="study-card focus-card">
             <h2 id="new-session-heading" tabindex="-1">Nueva sesión</h2>
-            @if (books().length) {
+            @if (activeBooks().length) {
               <form class="study-form" autocomplete="off" (submit)="start($event, preferredBook()?.id ?? selectedBook.value, section, duration.value)">
                 <label for="study-book">Libro</label>
                 @if (preferredBook(); as book) {
                   <input id="study-book" name="study-book" [value]="book.title" readonly>
                 }
                 <select #selectedBook name="study-book" [id]="preferredBook() ? 'study-book-selector' : 'study-book'" [hidden]="!!preferredBook()">
-                  @for (book of books(); track book.id) { <option [value]="book.id" [selected]="preferredBook()?.id === book.id">{{ book.title }}</option> }
+                  @for (book of activeBooks(); track book.id) { <option [value]="book.id" [selected]="preferredBook()?.id === book.id">{{ book.title }}</option> }
                 </select>
                 <label for="study-section">Sección</label>
                 <input #section id="study-section" name="study-section" required maxlength="160" [value]="studyTarget()?.section?.title ?? ''" [readOnly]="!!studyTarget()?.section" (input)="section.setCustomValidity('')">
@@ -210,7 +247,7 @@
       @case ('book') {
         @if (currentBook(); as selected) {
           @for (book of [selected]; track book.id) {
-            <app-book-detail [book]="book" [database]="database()" [sessions]="bookSessions()"
+            <app-book-detail [book]="book" [database]="database()" [sessions]="bookSessions()" [sectionId]="bookSectionId()"
               (changed)="applyBookChanges($event)" (study)="openStudy.emit($event)" />
           }
         } @else {
@@ -255,13 +292,19 @@
           <p>Descargá tus libros y tu progreso en un archivo JSON.</p>
           <div class="study-actions">
             <button class="secondary-action" type="button" (click)="exportData()">Exportar respaldo</button>
-            <label class="secondary-action file-action">Elegir respaldo<input #backupInput id="backup-file" name="backup-file" type="file" accept=".json,application/json" (change)="selectFile(backupInput)"></label>
+            <label class="secondary-action file-action">Elegir respaldo<input #backupInput id="backup-file" name="backup-file" type="file" accept=".json,application/json" [disabled]="saving()" (change)="selectFile(backupInput)"></label>
           </div>
           @if (restoreFile(); as file) {
             <div class="restore-confirm">
               <h3 id="restore-heading" tabindex="-1">Confirmá la restauración</h3>
               <p><strong>{{ file.name }}</strong> reemplazará la biblioteca y el progreso de este dispositivo.</p>
+              <dl class="progress-data">
+                <div><dt>Libros</dt><dd>{{ file.backup.books.length }}</dd></div>
+                <div><dt>Sesiones</dt><dd>{{ file.backup.study.sessions.length }}</dd></div>
+                <div><dt>Repasos registrados</dt><dd>{{ file.backup.study.attempts.length }}</dd></div>
+              </dl>
               <div class="study-actions">
+                <button class="secondary-action" type="button" [disabled]="saving()" (click)="exportData()">Descargar copia actual</button>
                 <button class="primary-action" type="button" [disabled]="saving() || !!evaluating()" (click)="restore()">Confirmar restauración</button>
                 <button class="secondary-action" type="button" [disabled]="saving()" (click)="restoreFile.set(null); backupInput.focus()">Cancelar</button>
               </div>

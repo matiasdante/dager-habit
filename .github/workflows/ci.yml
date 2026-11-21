@@ -13,13 +13,21 @@ jobs:
   app:
     name: Compilación, pruebas y arranque
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - name: Compilar y levantar el contenedor
-        run: docker compose up --build --wait --wait-timeout 90
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+      - name: Ejecutar pruebas unitarias
+        run: npm test --prefix habit-web
+      - name: Compilar la web y la API
+        run: docker compose build
+      - name: Levantar el contenedor
+        run: docker compose up --no-build --wait --wait-timeout 90
       - name: Verificar la web y la API
         run: |
           curl -fsS http://localhost:8080/health | jq -e '.status == "ok"'
@@ -27,6 +35,21 @@ jobs:
           curl -fsS http://localhost:8080/manifest.webmanifest | jq -e '.name == "The Dager Habit"'
           curl -fsS http://localhost:8080/ngsw.json | jq -e '.configVersion > 0'
           curl -fsS http://localhost:8080/api/session | jq -e '.connected == false'
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Preparar Chromium
+        working-directory: habit-web
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Probar los flujos de usuario en Chromium
+        run: |
+          mkdir -p "$RUNNER_TEMP/habit-app"
+          docker compose cp app:/app/. "$RUNNER_TEMP/habit-app"
+          HABIT_TEST_API_DLL="$RUNNER_TEMP/habit-app/Habit.Api.dll" \
+          HABIT_TEST_WEB_ROOT="$RUNNER_TEMP/habit-app/wwwroot" \
+          npm run test:browser --prefix habit-web
       - name: Mostrar registros si falla
         if: failure()
         run: docker compose logs
