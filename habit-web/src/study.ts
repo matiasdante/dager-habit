@@ -1,6 +1,7 @@
 import { Component, DestroyRef, Injector, afterNextRender, computed, inject, input, output, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { BookDetail, StudyTarget, downloadFile } from './book-detail';
+import { enter } from './motion';
 import { NotebookPanel } from './notebook';
 import {
   Attempt, Book, Feedback, Session, Study, addDays, bonus, emptyStudy, formatStudyDay, isFeedback, localDay,
@@ -213,9 +214,10 @@ export class StudyPanel {
       });
       if (saved) {
         if (step === 'done') this.status.set('Sesión completada. Encontrá las preguntas en Hoy cuando toque repasarlas.');
-        this.focusAfterRender(step === 'done'
-          ? (this.draft() ? 'step-heading' : 'completed-heading')
-          : 'step-heading');
+        const draft = this.draft();
+        const heading = step === 'done' && !draft ? 'completed-heading' : 'step-heading';
+        const revealStep = step !== 'done' && draft?.id === session.id && draft.step === step;
+        this.focusAfterRender(heading, revealStep);
       }
     } finally { this.saving.set(false); }
   }
@@ -530,11 +532,13 @@ export class StudyPanel {
     field?.reportValidity();
   }
 
-  private focusAfterRender(id: string): void {
+  private focusAfterRender(id: string, revealStep = false): void {
     const view = this.view();
     afterNextRender(() => {
       const target = document.getElementById(id);
-      if (view === this.view() && !target?.closest('[hidden]')) target?.focus();
+      if (view !== this.view() || !target || target.closest('[hidden]')) return;
+      target.focus();
+      if (revealStep) enter(target.closest<HTMLElement>('.focus-card'));
     }, { injector: this.injector });
   }
 

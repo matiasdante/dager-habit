@@ -12,7 +12,11 @@
             "browser": "src/main.ts",
             "index": "src/index.html",
             "tsConfig": "tsconfig.app.json",
-            "assets": [{ "glob": "**/*", "input": "public" }],
+            "assets": [
+              { "glob": "**/*", "input": "public" },
+              { "glob": "dm-sans-latin-wght-normal.woff2", "input": "node_modules/@fontsource-variable/dm-sans/files", "output": "media" },
+              { "glob": "fraunces-latin-wght-normal.woff2", "input": "node_modules/@fontsource-variable/fraunces/files", "output": "media" }
+            ],
             "styles": ["src/styles.css"]
           },
           "configurations": {

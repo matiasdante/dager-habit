@@ -1,16 +1,7 @@
 <div class="opening" #opening hidden aria-hidden="true" translate="no">
   <div class="opening-title">
-    @for (line of openingLines; track $index) {
-      <div class="opening-line">
-        @for (word of line; track word) {
-          <span class="opening-word">
-            @for (letter of word; track $index) {
-              <span class="opening-letter">{{ letter }}</span>
-            }
-          </span>
-        }
-      </div>
-    }
+    <div class="opening-line"><span>The</span><span>Dager</span></div>
+    <div class="opening-line"><span>Habit</span></div>
   </div>
 </div>
 
@@ -35,7 +26,7 @@
 <div [hidden]="view() !== 'library'">
   <section class="hero" aria-labelledby="page-title">
     <div class="hero-copy">
-      <div #libraryHeading class="hero-heading">
+      <div class="hero-heading">
         <h1 id="page-title" tabindex="-1">Biblioteca</h1>
         <p>Guardá los libros que querés estudiar.</p>
       </div>
@@ -43,13 +34,13 @@
     </div>
     @if (view() === 'library') {
       <div class="hero-image" aria-hidden="true">
-        <img #heroPhoto src="reading-desk.jpg" alt="" width="960" height="640" fetchpriority="high">
+        <img src="reading-desk.jpg" alt="" width="960" height="640" fetchpriority="high">
       </div>
     }
   </section>
 
   <div class="library-content">
-    <section class="entry" [hidden]="loading()" aria-labelledby="new-book">
+    <section class="entry" [class.is-pending]="loading()" aria-labelledby="new-book">
       <h2 id="new-book">Buscar libros</h2>
       <form class="catalog-search" role="search" aria-label="Buscar libros" autocomplete="off" (submit)="searchBooks($event, bookQuery)">
         <div class="catalog-field">
@@ -184,7 +175,7 @@
       } @else if (loading()) {
         <p role="status" class="collection-message">Cargando biblioteca…</p>
       } @else if (collection().length) {
-        <ul class="book-list" role="list">
+        <ul #bookList class="book-list" role="list">
           @for (book of collection(); track book.id; let index = $index) {
             <li>
               <a class="book-row book-link" [href]="bookLink(book.id)">
