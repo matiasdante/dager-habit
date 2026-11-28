@@ -10,11 +10,12 @@ services:
     environment:
       ASPNETCORE_HTTP_PORTS: "8080"
       HABIT_WEB_ROOT: /app/wwwroot
+      HABIT_DATA_DIR: /app/data
       HABIT_QUOTA_PATH: /app/data/quota.log
     ports:
       - "127.0.0.1:${HABIT_PORT:-8080}:8080"
     volumes:
-      - quota:/app/data
+      - data:/app/data
     healthcheck:
       test:
         - CMD
@@ -30,4 +31,4 @@ services:
       retries: 12
 
 volumes:
-  quota:
+  data:

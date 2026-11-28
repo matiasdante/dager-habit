@@ -4,11 +4,12 @@ services:
     env_file: ${HABIT_ENV_FILE:?Indicá el archivo de credenciales del servidor}
     environment:
       HABIT_WEB_ROOT: /app/wwwroot
+      HABIT_DATA_DIR: /app/data
       HABIT_QUOTA_PATH: /app/data/quota.log
     ports:
       - "127.0.0.1:${HABIT_HOST_PORT:?Indicá un puerto libre del host}:8080"
     volumes:
-      - quota:/app/data
+      - data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3; read -r status <&3; [[ $$status == *' 200 '* ]]"]
@@ -16,4 +17,4 @@ services:
       timeout: 5s
       retries: 3
 volumes:
-  quota:
+  data:
