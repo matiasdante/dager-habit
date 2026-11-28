@@ -128,7 +128,7 @@ internal sealed partial class BookCatalog(HttpClient client, IMemoryCache cache,
             Whitespace().Replace(WebUtility.HtmlDecode(Markup().Replace(summary, " ")), " ").Trim(), 500), cover, pages);
     }
 
-    private async Task<JsonElement> GetAsync(string path, CancellationToken cancellation)
+    internal async Task<JsonElement> GetAsync(string path, CancellationToken cancellation)
     {
         var key = "catalog:" + path;
         if (cache.TryGetValue<JsonElement>(key, out var cached)) return cached;
@@ -153,7 +153,7 @@ internal sealed partial class BookCatalog(HttpClient client, IMemoryCache cache,
     internal static JsonElement[] ArrayAt(JsonElement node, string name) =>
         node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var field) && field.ValueKind == JsonValueKind.Array
             ? field.EnumerateArray().ToArray() : [];
-    private static int? PositiveAt(JsonElement item, string name) =>
+    internal static int? PositiveAt(JsonElement item, string name) =>
         item.TryGetProperty(name, out var field) && field.ValueKind == JsonValueKind.Number && field.TryGetInt32(out var value) && value > 0
             ? value : null;
     private static int? CoverAt(JsonElement item)
@@ -162,7 +162,7 @@ internal sealed partial class BookCatalog(HttpClient client, IMemoryCache cache,
             if (cover.ValueKind == JsonValueKind.Number && cover.TryGetInt32(out var value) && value > 0) return value;
         return null;
     }
-    private static string Shorten(string value, int length) => value.Length > length ? value[..(length - 1)].TrimEnd() + "…" : value;
+    internal static string Shorten(string value, int length) => value.Length > length ? value[..(length - 1)].TrimEnd() + "…" : value;
 
     [GeneratedRegex(@"^OL[0-9]{1,12}W$")] private static partial Regex WorkId();
     [GeneratedRegex(@"^OL[0-9]{1,12}M$")] private static partial Regex EditionId();

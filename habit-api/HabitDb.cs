@@ -27,6 +27,12 @@ internal sealed class Book
     public string? Isbn { get; set; }
     public int? TotalPages { get; set; }
     public int? Page { get; set; }
+    public string? Language { get; set; }
+    public int? PublicationYear { get; set; }
+    public string? Summary { get; set; }
+    /// <summary>Tipo MIME de la portada guardada en el volumen, o null si no tiene.</summary>
+    public string? CoverType { get; set; }
+    public int MetadataAttempts { get; set; }
     public bool Archived { get; set; }
     public MetadataStatus MetadataStatus { get; set; } = MetadataStatus.Complete;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -57,6 +63,10 @@ internal sealed class HabitDb(DbContextOptions<HabitDb> options, CurrentUser cur
             book.Property(item => item.Title).HasMaxLength(200);
             book.Property(item => item.Author).HasMaxLength(150);
             book.Property(item => item.Isbn).HasMaxLength(13);
+            book.Property(item => item.Language).HasMaxLength(3);
+            book.Property(item => item.Summary).HasMaxLength(1000);
+            book.Property(item => item.CoverType).HasMaxLength(16);
+            book.HasIndex(item => new { item.UserId, item.Isbn }).IsUnique();
             book.Property(item => item.MetadataStatus).HasConversion<string>().HasMaxLength(16);
             book.HasIndex(item => new { item.UserId, item.Archived });
         });
