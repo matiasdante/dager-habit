@@ -1,7 +1,5 @@
 **
 !Dockerfile
 !Habit.Api.csproj
-!Program.cs
-!AiProviders.cs
-!BookCatalog.cs
-!NotebookAccess.cs
+!*.cs
+!Migrations/*.cs

@@ -12,7 +12,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0 AS api-build
 WORKDIR /source
 COPY Habit.Api.csproj ./
 RUN dotnet restore
-COPY Program.cs AiProviders.cs BookCatalog.cs NotebookAccess.cs ./
+COPY *.cs ./
+COPY Migrations ./Migrations
 RUN dotnet publish -c Release --no-restore -o /release /p:UseAppHost=false
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
@@ -20,7 +21,7 @@ WORKDIR /app
 RUN mkdir -p /app/data && chown "${APP_UID}:0" /app/data
 COPY --from=api-build /release .
 COPY --from=web-build /source/dist/habit-web/browser ./wwwroot
-ENV ASPNETCORE_HTTP_PORTS=8080 HABIT_WEB_ROOT=/app/wwwroot HABIT_QUOTA_PATH=/app/data/quota.log
+ENV ASPNETCORE_HTTP_PORTS=8080 HABIT_WEB_ROOT=/app/wwwroot HABIT_DATA_DIR=/app/data HABIT_QUOTA_PATH=/app/data/quota.log
 USER $APP_UID
 EXPOSE 8080
 ENTRYPOINT ["dotnet", "Habit.Api.dll"]

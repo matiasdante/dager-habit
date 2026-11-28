@@ -4,11 +4,17 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.FileProviders;
 
 var builder = WebApplication.CreateBuilder(args);
 var webRoot = builder.Configuration["HABIT_WEB_ROOT"];
+var dataPath = Path.GetFullPath(builder.Configuration["HABIT_DATA_DIR"] is { Length: > 0 } dataDir
+    ? dataDir : Path.Combine(builder.Environment.ContentRootPath, "data"));
+Directory.CreateDirectory(dataPath);
+builder.Services.AddScoped<CurrentUser>();
+builder.Services.AddDbContext<HabitDb>(options => options.UseSqlite(HabitDb.ConnectionString(dataPath)));
 
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 100_000);
 builder.Services.AddSingleton<AiProviders>();
@@ -53,7 +59,15 @@ builder.Services.AddRateLimiter(options =>
 });
 
 var app = builder.Build();
+await using (var scope = app.Services.CreateAsyncScope())
+    await scope.ServiceProvider.GetRequiredService<HabitDb>().Database.MigrateAsync();
 if (!app.Environment.IsDevelopment()) app.UseHsts();
+app.Use(async (context, next) =>
+{
+    // Con el login apagado toda petición es del usuario local; el login opcional reemplaza esta línea.
+    context.RequestServices.GetRequiredService<CurrentUser>().Id = HabitDb.LocalUserId;
+    await next(context);
+});
 app.Use(async (context, next) =>
 {
     context.Response.Headers.XContentTypeOptions = "nosniff";
@@ -84,6 +98,19 @@ app.UseRateLimiter();
 BookCatalog.Map(app);
 NotebookAccess.Map(app);
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/api/me", async (HabitDb db, CurrentUser current, CancellationToken cancellation) =>
+    Results.Ok(await db.Users.Where(user => user.Id == current.Id)
+        .Select(user => new { user.Id, user.Username, user.IsAdmin, user.TimeZone }).SingleAsync(cancellation)));
+app.MapPut("/api/me/time-zone", async (HttpContext context, TimeZoneChange change, HabitDb db, CurrentUser current,
+    CancellationToken cancellation) =>
+{
+    if (!AppAccess.IsBrowserRequest(context)) return Results.StatusCode(403);
+    if (change.TimeZone is not { Length: > 0 and <= 64 } id || !TimeZoneInfo.TryFindSystemTimeZoneById(id, out _))
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["timeZone"] = ["Elegí una zona horaria válida."] });
+    await db.Users.Where(user => user.Id == current.Id)
+        .ExecuteUpdateAsync(set => set.SetProperty(user => user.TimeZone, id), cancellation);
+    return Results.NoContent();
+});
 app.MapGet("/api/session", (HttpContext context, IConfiguration config) =>
     Results.Ok(new { connected = AppAccess.Configured(config) && AppAccess.HasCookie(context, config) }));
 app.MapPost("/api/session", (HttpContext context, SignIn request, IConfiguration config) =>
@@ -210,6 +237,8 @@ record EvaluationResult(
 }
 
 record SignIn(string? Token);
+
+record TimeZoneChange(string? TimeZone);
 
 static class AppAccess
 {

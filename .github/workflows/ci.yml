@@ -35,9 +35,12 @@ jobs:
           curl -fsS http://localhost:8080/manifest.webmanifest | jq -e '.name == "The Dager Habit"'
           curl -fsS http://localhost:8080/ngsw.json | jq -e '.configVersion > 0'
           curl -fsS http://localhost:8080/api/session | jq -e '.connected == false'
+          curl -fsS http://localhost:8080/api/me | jq -e '.username == "local"'
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
+      - name: Ejecutar pruebas de la API
+        run: dotnet test habit-api.Tests
       - name: Preparar Chromium
         working-directory: habit-web
         run: |
