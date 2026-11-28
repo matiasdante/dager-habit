@@ -38,6 +38,28 @@ builder.Services.AddHttpClient<BookCatalog>(client =>
     if (!string.IsNullOrWhiteSpace(builder.Configuration["OPENLIBRARY_CONTACT"]))
         client.DefaultRequestHeaders.From = builder.Configuration["OPENLIBRARY_CONTACT"];
 }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddSingleton(new DataPaths(dataPath));
+builder.Services.AddSingleton<CoverStore>();
+builder.Services.AddTransient<IBookSource, OpenLibrarySource>();
+if (!string.IsNullOrWhiteSpace(builder.Configuration["GOOGLE_BOOKS_API_KEY"]))
+{
+    builder.Services.AddHttpClient<GoogleBooksSource>(client =>
+    {
+        client.BaseAddress = new Uri("https://www.googleapis.com/");
+        client.Timeout = TimeSpan.FromSeconds(10);
+        client.MaxResponseContentBufferSize = 256_000;
+    }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+    builder.Services.AddTransient<IBookSource>(services => services.GetRequiredService<GoogleBooksSource>());
+}
+builder.Services.AddTransient<BookLookup>();
+builder.Services.AddTransient<BookEnricher>();
+builder.Services.AddHostedService<MetadataWorker>();
+builder.Services.AddHttpClient("covers", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+    client.MaxResponseContentBufferSize = 400_000;
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Dager-Habit/1.0");
+}).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddHttpClient<NotebookAccess>(client =>
 {
     client.Timeout = TimeSpan.FromSeconds(25);
@@ -96,6 +118,7 @@ if (!string.IsNullOrWhiteSpace(webRoot))
 }
 app.UseRateLimiter();
 BookCatalog.Map(app);
+BookEndpoints.Map(app);
 NotebookAccess.Map(app);
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", async (HabitDb db, CurrentUser current, CancellationToken cancellation) =>

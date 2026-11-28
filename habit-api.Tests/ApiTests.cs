@@ -5,7 +5,10 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
-public sealed class ApiFactory : WebApplicationFactory<Program>
+// Las pruebas comparten la variable de entorno del directorio de datos: se corren de a una.
+[assembly: CollectionBehavior(DisableTestParallelization = true)]
+
+public class ApiFactory : WebApplicationFactory<Program>
 {
     public string DataDir { get; } = Directory.CreateTempSubdirectory("habit-test-").FullName;
 

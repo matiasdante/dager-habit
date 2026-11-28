@@ -30,12 +30,23 @@ namespace Habit.Api.Migrations
                         .HasMaxLength(150)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CoverType")
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Isbn")
                         .HasMaxLength(13)
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("Language")
+                        .HasMaxLength(3)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("MetadataAttempts")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("MetadataStatus")
                         .IsRequired()
@@ -44,6 +55,13 @@ namespace Habit.Api.Migrations
 
                     b.Property<int?>("Page")
                         .HasColumnType("INTEGER");
+
+                    b.Property<int?>("PublicationYear")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -59,6 +77,9 @@ namespace Habit.Api.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("UserId", "Archived");
+
+                    b.HasIndex("UserId", "Isbn")
+                        .IsUnique();
 
                     b.ToTable("Books");
                 });
